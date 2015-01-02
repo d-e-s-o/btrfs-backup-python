@@ -1,7 +1,7 @@
 # __init__.py
 
 #/***************************************************************************
-# *   Copyright (C) 2014 Daniel Mueller (deso@posteo.net)                   *
+# *   Copyright (C) 2014-2015 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -23,4 +23,7 @@
 from deso.execute.execute_ import (
   execute,
   executeAndRead,
+  formatPipeline,
+  pipeline,
+  pipelineAndRead,
 )
