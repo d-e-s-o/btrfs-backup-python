@@ -21,7 +21,7 @@
 .PHONY: test
 test: ROOT := $(shell pwd)/..
 test:
-	@PYTHONPATH="$(ROOT)/execute/src:$(ROOT)/btrfs-backup/src:${PYTHONPATH}"\
+	@PYTHONPATH="$(ROOT)/cleanup/src:$(ROOT)/execute/src:$(ROOT)/btrfs-backup/src:${PYTHONPATH}"\
 	 PYTHONDONTWRITEBYTECODE=1\
 		python -m unittest --verbose --buffer\
 			src/deso/btrfs/test/testBtrfs.py\

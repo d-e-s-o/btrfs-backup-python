@@ -1,7 +1,7 @@
-# __init__.py
+# Makefile
 
 #/***************************************************************************
-# *   Copyright (C) 2014-2015 Daniel Mueller (deso@posteo.net)              *
+# *   Copyright (C) 2015 Daniel Mueller (deso@posteo.net)                   *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -17,14 +17,9 @@
 # *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
 # ***************************************************************************/
 
-"""Initialization file for the deso.execute package."""
 
-
-from deso.execute.execute_ import (
-  execute,
-  formatPipeline,
-  pipeline,
-)
-from deso.execute.util import (
-  findCommand,
-)
+.PHONY: test
+test:
+	@PYTHONPATH="$(shell pwd)/src/:${PYTHONPATH}"\
+	 PYTHONDONTWRITEBYTECODE=1\
+	  python -m unittest --verbose deso.cleanup.test.allTests
