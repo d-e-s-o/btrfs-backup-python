@@ -137,7 +137,7 @@ def _snapshots(repository):
       snapshots() method instead.
   """
   cmd = repository.command(listSnapshots, repository.path())
-  output, _ = execute(*cmd, read_out=True)
+  output, _ = execute(*cmd, read_out=True, read_err=repository.readStderr)
   # We might retrieve an empty output if no snapshots were present. In
   # this case, just return early here.
   if not output:
@@ -151,7 +151,7 @@ def _snapshots(repository):
 def _isRoot(directory, repository):
   """Check if a given directory represents the root of a btrfs file system."""
   cmd = repository.command(show, directory)
-  output, _ = execute(*cmd, read_out=True)
+  output, _ = execute(*cmd, read_out=True, read_err=repository.readStderr)
   output = output.decode("utf-8")[:-1].split("\n")
 
   # The output of show() contains multiple lines in case the given
@@ -306,7 +306,7 @@ def _createSnapshot(subvolume, repository, snapshots):
   name = _snapshotName(subvolume, snapshots)
   cmd = repository.command(mkSnapshot, subvolume, repository.path(name))
 
-  execute(*cmd)
+  execute(*cmd, read_err=repository.readStderr)
   return name
 
 
@@ -358,13 +358,16 @@ def _deploy(snapshot, parent, src, dst, src_snaps, subvolume):
 
   # Be sure to have the snapshot persisted to disk before trying to
   # serialize it.
-  execute(*src.command(syncFs, src.root))
+  execute(*src.command(syncFs, src.root), read_err=src.readStderr)
+  # Only if both repositories agree that we should read data from
+  # stderr we will do so.
+  read_err = src.readStderr and dst.readStderr
   # Finally transfer the snapshot from the source repository to the
   # destination.
   pipeline([
     src.command(serialize, src.path(snapshot), parents),
     dst.command(deserialize, dst.path()),
-  ])
+  ], read_err=read_err)
 
 
 def _sync(subvolume, src, dst):
@@ -444,7 +447,7 @@ def _restore(subvolume, src, dst, snapshots, snapshots_only):
   # we can restore the actual subvolume from it (if desired).
   if not snapshots_only:
     cmd = dst.command(mkSnapshot, dst.path(snapshot), subvolume, writable=True)
-    execute(*cmd)
+    execute(*cmd, read_err=dst.readStderr)
 
 
 def restore(subvolumes, src, dst, snapshots_only=False):
@@ -474,7 +477,7 @@ def _diff(snapshot, subvolume, repository):
   #       generation (I assume so, but it would be best to get
   #       confirmation).
   cmd = repository.command(diff, subvolume, generation)
-  output, _ = execute(*cmd, read_out=True)
+  output, _ = execute(*cmd, read_out=True, read_err=repository.readStderr)
   output = output.decode("utf-8")[:-1].split("\n")
   # The diff output usually is ended by a line such as:
   # "transid marker was" followed by a generation ID. We should ignore
@@ -506,7 +509,7 @@ def _purge(subvolume, repository, duration, snapshots):
     time = datetime.strptime(string, _TIME_FORMAT)
     if time + duration < now:
       cmd = repository.command(delete, repository.path(snapshot))
-      execute(*cmd)
+      execute(*cmd, read_err=repository.readStderr)
 
 
 def _trail(path):
@@ -516,11 +519,12 @@ def _trail(path):
 
 class Repository:
   """This class represents a repository for snapshots."""
-  def __init__(self, directory, remote_cmd=None):
+  def __init__(self, directory, read_err=True, remote_cmd=None):
     """Initialize the object and bind it to the given directory."""
     # We always work with absolute paths here.
     directory = abspath(directory)
 
+    self._read_err = read_err
     self._remote_cmd = remote_cmd
     self._root = _findRoot(directory, self)
     self._directory = _trail(directory)
@@ -609,3 +613,14 @@ class Repository:
   def root(self):
     """Retrieve the root directory of the btrfs file system the repository resides on."""
     return self._root
+
+
+  @property
+  def readStderr(self):
+    """Check whether or not to read data from stderr when executing a command."""
+    # Note that for the simple reason that we run into issues where to
+    # repositories are involved in a single command execution, having
+    # this property per-repository is not the best idea. However, it was
+    # deemed the most usable one because introducing another abstraction
+    # just for command execution would bloat the code unnecessarily.
+    return self._read_err
