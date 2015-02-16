@@ -236,6 +236,25 @@ class _PipelineFileDescriptors:
     self._stdout = {}
     self._stderr = {}
 
+    # We want to redirect all file descriptors that we do not want
+    # anything from to /dev/null. But we only want to open the latter
+    # in case someone really requires it, i.e., if not all three
+    # channels are connected to pipes or user-defined file descriptors
+    # anyway.
+    if stdin is None or stdout is None or stderr is None:
+      null = open_(devnull, O_RDWR | O_CLOEXEC)
+      here.defer(lambda: close_(null))
+
+      if stdin is None:
+        stdin = null
+      if stdout is None:
+        stdout = null
+      if stderr is None:
+        stderr = null
+
+    # At this point stdin, stdout, and stderr are all either a valid
+    # file descriptor (i.e., of type int) or some data.
+
     # Now, depending on whether we got passed in a file descriptor (an
     # object of type int), remember it or create a pipe to read or write
     # data.
@@ -334,8 +353,7 @@ class _PipelineFileDescriptors:
             error = error.format(s=string, e=event)
             raise ConnectionError(error)
 
-      return self._stdout["data"] if self._stdout else b"",\
-             self._stderr["data"] if self._stderr else b""
+      return self.data()
 
 
   def stdin(self):
@@ -353,6 +371,12 @@ class _PipelineFileDescriptors:
     return self._stderr["out"] if self._stderr else self._file_err
 
 
+  def data(self):
+    """Retrieve the data polled so far as a (stdout, stderr) tuple."""
+    return self._stdout["data"] if self._stdout else b"",\
+           self._stderr["data"] if self._stderr else b""
+
+
 def pipeline(commands, stdin=None, stdout=None, stderr=b""):
   """Execute a pipeline, supplying the given data to stdin and reading from stdout & stderr.
 
@@ -368,25 +392,6 @@ def pipeline(commands, stdin=None, stdout=None, stderr=b""):
   """
   with defer() as later:
     with defer() as here:
-      # We want to redirect all file descriptors that we do not want
-      # anything from to /dev/null. But we only want to open the latter
-      # in case someone really requires it, i.e., if not all three
-      # channels are connected to pipes or user-defined file descriptors
-      # anyway.
-      if stdin is None or stdout is None or stderr is None:
-        null = open_(devnull, O_RDWR | O_CLOEXEC)
-        here.defer(lambda: close_(null))
-
-        if stdin is None:
-          stdin = null
-        if stdout is None:
-          stdout = null
-        if stderr is None:
-          stderr = null
-
-      # At this point stdin, stdout, and stderr are all either a valid
-      # file descriptor (i.e., of type int) or some data.
-
       # Set up the file descriptors to pass to our execution pipeline.
       fds = _PipelineFileDescriptors(later, here, stdin, stdout, stderr)
 

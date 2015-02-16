@@ -49,6 +49,10 @@ def defer():
         # Mark function as executed.
         self._function = None
 
+    def release(self):
+      """Release the function from the defer operation without invoking it."""
+      self._function = None
+
   class _Defer:
     """Objects of this class act as a context with which to register deferred functions."""
     def __init__(self):
@@ -68,6 +72,10 @@ def defer():
       result = _Function(function)
       self._functions += [result]
       return result
+
+    def release(self):
+      """Release all deferred functions without executing them."""
+      self._functions = []
 
     def destroy(self):
       """Destroy the object, invoke all deferred functions."""

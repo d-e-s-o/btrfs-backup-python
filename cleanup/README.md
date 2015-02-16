@@ -27,6 +27,40 @@ This example also illustrates another important fact: execution of the various
 cleanup routines happens in reverse order of their registration. This property
 is important in most scenarios where resources of interest have dependencies.
 
+Sometimes cleanup is only necessary in case an error occurs. That is, if
+all operations (resource acquisitions etc.) succeed, we do not want to
+roll back and undo a part of them. To that end, a defer context can be
+"released" in which case no cleanup happens after block exit. Revisiting
+the example above:
+
+```python
+client = Client()
+with defer() as d:
+  obj = Object()
+  d.defer(obj.destroy)
+  obj.register(client)
+  d.defer(lambda: obj.unregister(client))
+
+  # Do some action that potentially raises an error.
+
+  # If we got here we want to keep the object created and registered
+  # with the client.
+  d.release()
+```
+
+This mechanism not only works on the level of a context but also for
+individually deferred functions:
+```python
+client = Client()
+with defer() as d:
+  obj = Object()
+  f = d.defer(obj.destroy)
+
+  # Do some action that potentially raises an error.
+
+  f.release()
+```
+
 
 Installation
 ------------

@@ -120,5 +120,29 @@ class TestExecute(TestCase):
     self.assertEqual(self._counter.count(), 1)
 
 
+  def testDeferFunctionRelease(self):
+    """Test the release functionality of deferred functions."""
+    with defer() as d:
+      f = d.defer(self._counter.increment)
+      _ = d.defer(self._counter.increment)
+
+      f.release()
+
+    # Only one increment should have been executed.
+    self.assertEqual(self._counter.count(), 1)
+
+
+  def testDeferReleaseAll(self):
+    """Test the release functionality of defer objects."""
+    with defer() as d:
+      d.defer(self._counter.increment)
+      d.defer(self._counter.increment)
+
+      d.release()
+
+    # No function should have been executed.
+    self.assertEqual(self._counter.count(), 0)
+
+
 if __name__ == "__main__":
   main()
