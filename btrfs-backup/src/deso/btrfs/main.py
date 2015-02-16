@@ -421,7 +421,10 @@ def main(argv):
   # the actual --reverse option, but that is guaranteed since we insert
   # it at the end).
   args = argv[1:].copy()
-  args = insertArg(args, ["--reverse-hidden-helper", "42"])
+
+  if "--reverse" in args:
+    args = insertArg(args, ["--reverse-hidden-helper", "42"])
+
   args = reorderArg(args, "--snapshot-ext")
   parser.parse_args(args, namespace)
 

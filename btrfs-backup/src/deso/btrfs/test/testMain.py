@@ -90,6 +90,13 @@ class TestMain(BtrfsTestCase):
         duration(fail)
 
 
+  def testInvokeNoArguments(self):
+    """Verify the intended output is printed when the program is run without arguments."""
+    regex = "the following arguments are required"
+    with self.assertRaisesRegex(ChildProcessError, regex):
+      execute(executable, "-m", "deso.btrfs.main")
+
+
   def testUsage(self):
     """Verify that the help contains an uppercase 'Usage:' string."""
     def runMain(*args):
