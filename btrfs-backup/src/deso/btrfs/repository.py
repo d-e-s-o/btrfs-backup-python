@@ -44,6 +44,9 @@ from deso.btrfs.command import (
   snapshots as listSnapshots,
   sync as syncFs,
 )
+from deso.btrfs.commands import (
+  replaceFileString,
+)
 from deso.execute import (
   execute,
   formatPipeline,
@@ -854,34 +857,12 @@ class FileRepository(RepositoryBase):
     """Create a pipeline out of the filter commands."""
     def replaceFiles(command, snapshots):
       """Replace the {file} string in a command with the actual snapshot name."""
-      # TODO: This method replicates the argument that contains the
-      #       {file} string to allow not only for lists of snapshot
-      #       files in a consecutive fashion (i.e., "/bin/cat {file}"
-      #       is expanded to "/bin/cat file1 file2 ...") but also
-      #       for multiple options ("/bin/dd if={file}" is expanded to
-      #       "/bin/dd if=file1 if=file2 ...". However, because of the
-      #       one argument assumption, this function cannot handle short
-      #       options where there is a space between the argument and
-      #       its parameter since they would appear as different
-      #       arguments altogether (that is, "/bin/tar -f {file}" would
-      #       be supplied as ['/bin/tar', '-f', '{file}'] and the fact
-      #       that the {file} string belongs to the -f option is lost to
-      #       the function. As of now this limitation is not a problem
-      #       because of a lack of programs using this style of
-      #       argument passing. It might become one, though.
-      for i, arg in enumerate(command):
-        # Check if the argument contains the replacement string {file}.
-        # If it does, then replicate it for each snapshot while
-        # replacing the string with its actual name.
-        if "{file}" in arg:
-          # Replace the current argument with the list of arguments with
-          # all the snapshot names.
-          command[i:i+1] = [arg.format(file=s) for s in snapshots]
-          return command
-
-      error = "Replacement string {{file}} not found in command: \"{cmd}\""
-      error = error.format(cmd=formatPipeline([command]))
-      raise NameError(error)
+      if not replaceFileString(command, snapshots):
+        error = "Replacement string {{file}} not found in command: \"{cmd}\""
+        error = error.format(cmd=formatPipeline([command]))
+        raise NameError(error)
+      else:
+        return command
 
     # Convert all relative snapshot paths into absolute ones with the
     # appropriate extension.

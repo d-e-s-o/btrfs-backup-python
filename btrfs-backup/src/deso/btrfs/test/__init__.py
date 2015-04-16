@@ -35,6 +35,7 @@ def allTests():
   tests = [
     "testArgv.py",
     "testBtrfs.py",
+    "testCommands.py",
     "testDefer.py",
     "testLocaleCompliance.py",
     "testMain.py",
