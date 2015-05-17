@@ -17,7 +17,36 @@
 # *   along with this program.  If not, see <http://www.gnu.org/licenses/>. *
 # ***************************************************************************/
 
-"""Functions for command execution."""
+"""Functions for command execution.
+
+  A command in our sense is a list of strings. The first element
+  typically contains the absolute path of the executable to invoke and
+  subsequent elements act as arguments being supplied.
+  In various scenarios a single command is not enough to accomplish a
+  job. To that end, there are two forms in which multiple commands can
+  be arranged. The first, the pipeline, is a list of commands. A
+  pipeline represents a sequence of commands where the output of the
+  previous command is supplied as the input of the next one.
+  The second one, a spring, is similar to a pipeline except for the
+  first element which is a list of commands itself. The idea is that
+  this first set of commands is executed in a serial fashion and the
+  output is accumulated and supplied to the remaining commands (which,
+  in turn, can be regarded as a pipeline.
+
+  A sample of a pipeline is:
+  [
+    ['/bin/cat', '/tmp/input'],
+    ['/bin/tr', 'a', 'a'],
+    ['/bin/dd', 'of=/tmp/output'],
+  ]
+
+  Consequently, a spring could look like:
+  [
+    [['/bin/cat', '/tmp/input1'], ['/bin/cat', '/tmp/input2']],
+    ['/bin/tr', 'a', 'a'],
+    ['/bin/dd', 'of=/tmp/output'],
+  ]
+"""
 
 from deso.cleanup import (
   defer,
@@ -173,7 +202,7 @@ def formatCommands(commands):
   return s
 
 
-def _wait(pids, commands, data_err):
+def _wait(pids, commands, data_err, failed=None):
   """Wait for all processes represented by a list of process IDs.
 
     Although it might not seem necessary to wait for any other than the
@@ -194,8 +223,15 @@ def _wait(pids, commands, data_err):
       stage). We set a high priority on reporting potential failures to
       users.
   """
-  assert len(pids) == len(commands)
-  failed = None
+  # In case of an error during execution of a spring (no error will be
+  # detected that early in a pipeline) we might have less pids to wait
+  # for than commands passed in because not all commands were executed
+  # yet. Also note that although 'commands' might be a spring (i.e.,
+  # contain a list of commands itself), the number of pids cannot exceed
+  # the top-level length of this list because inside of a spring we
+  # already execute (and wait for) all but the last of these "internal"
+  # commands.
+  assert len(pids) <= len(commands)
 
   for i, pid in enumerate(pids):
     _, status = waitpid(pid, 0)
@@ -279,6 +315,12 @@ class _PipelineFileDescriptors:
       data["close"] = later.defer(lambda: close_(data["in"]))
       here.defer(lambda: close_(data["out"]))
 
+    # By default we are blockable, i.e., we invoke poll without a
+    # timeout. This property has to be an attribute of the object
+    # because we might want to change it during an invocation of the
+    # poll method that yielded.
+    self._timeout = None
+
     # We need three dict objects, each representing one of the available
     # data channels. Depending on whether the channel is actually used
     # or not they get populated on demand or stay empty, respectively.
@@ -325,7 +367,24 @@ class _PipelineFileDescriptors:
 
 
   def poll(self):
-    """Poll the file pipe descriptors for more data until each indicated that it is done."""
+    """Poll the file pipe descriptors for more data until each indicated that it is done.
+
+      There are two modes in which this method can work. In blocking
+      mode (the default), we will block waiting for new data to become
+      available for processing. In non-blocking mode we yield if no more
+      data is currently available but can resume polling later. The
+      blocking mode can be influenced via the blockable member function.
+      Note that this change can even happen after we yielded execution
+      in the non blockable case.
+
+      Note that because we require non-blocking behavior in order to
+      support springs, this function uses 'yield' instead of 'return'
+      for conveying any results to the caller (even in the blockable
+      case). The reason is a little Python oddity where a function that
+      yields anything (even in a path that is never reached), always
+      implicitly returns a generator rather as opposed to a "direct"
+      result.
+    """
     def pollWrite(data):
       """Conditionally set up polling for write events."""
       if data:
@@ -357,7 +416,7 @@ class _PipelineFileDescriptors:
       pollRead(self._stderr)
 
       while polls:
-        events = poll_.poll()
+        events = poll_.poll(self._timeout)
 
         for fd, event in events:
           close = False
@@ -403,7 +462,15 @@ class _PipelineFileDescriptors:
             error = error.format(s=string, e=event)
             raise ConnectionError(error)
 
-      return self.data()
+        if self._timeout is not None:
+          yield
+
+      yield
+
+
+  def blockable(self, can_block):
+    """Set whether or not polling is allowed to block."""
+    self._timeout = None if can_block else 0
 
 
   def stdin(self):
@@ -449,10 +516,155 @@ def pipeline(commands, stdin=None, stdout=None, stderr=b""):
       # descriptors to use.
       pids = _pipeline(commands, fds.stdin(), fds.stdout(), fds.stderr())
 
-    data_out, data_err = fds.poll()
+    for _ in fds.poll():
+      pass
+
+    data_out, data_err = fds.data()
 
   # We have read or written all data that was available, the last thing
   # to do is to wait for all the processes to finish and to clean them
   # up.
   _wait(pids, commands, data_err)
+  return data_out, data_err
+
+
+def _spring(commands, fds):
+  """Execute a series of commands and accumulate their output to a single destination.
+
+    Due to the nature of springs control flow here is a bit tricky. We
+    want to execute the first set of commands in a serial manner.
+    However, we need to get the remaining processes running in order to
+    not stall everything (because nobody consumes any of the output).
+    Furthermore, we need to poll for incoming data to be processed. That
+    in turn is a process that must not block. Last but not least,
+    because the first set of commands runs in a serial manner, we need
+    to wait for each process to finish, which might be done with an
+    error code. In such a case we return early but still let the _wait
+    function handle the error propagation.
+  """
+  def pollData(poller):
+    """Poll for new data."""
+    # The poller might become exhausted here under certain
+    # circumstances. We do not care, it will always quit with an
+    # StopIteration exception which we kindly ignore.
+    try:
+      next(poller)
+    except StopIteration:
+      pass
+
+  assert len(commands) > 0, commands
+  assert len(commands[0]) > 0, commands
+  assert isinstance(commands[0][0], list), commands
+
+  pids = []
+  first = True
+  failed = None
+  poller = None
+
+  fd_in = fds.stdin()
+  fd_out = fds.stdout()
+  fd_err = fds.stderr()
+
+  # A spring consists of a number of commands executed in a serial
+  # fashion with their output accumulated to a single destination and a
+  # (possibly empty) pipeline that processes the output of the spring.
+  spring_cmds = commands[0]
+  pipe_cmds = commands[1:]
+
+  # We need a pipe to connect the spring's output with the pipeline's
+  # input, if there is a pipeline following the spring.
+  if pipe_cmds:
+    fd_in_new, fd_out_new = pipe2(O_CLOEXEC)
+  else:
+    fd_in_new = fd_in
+    fd_out_new = fd_out
+
+  for i, command in enumerate(spring_cmds):
+    last = i == len(spring_cmds) - 1
+
+    pid = fork()
+    child = pid == 0
+
+    if child:
+      dup2(fd_in, stdin_.fileno())
+      dup2(fd_out_new, stdout_.fileno())
+      dup2(fd_err, stderr_.fileno())
+
+      if pipe_cmds:
+        close_(fd_in_new)
+        close_(fd_out_new)
+
+      execl(command[0], *command)
+      _exit(-1)
+    else:
+      # After we started the first command from the spring we need to
+      # make sure that there is a consumer of the output data. If there
+      # were none, the new process could potentially block forever
+      # trying to write data. To that end, start the remaining commands
+      # in the form of a pipeline.
+      if first:
+        if pipe_cmds:
+          pids += _pipeline(pipe_cmds, fd_in_new, fd_out, fd_err)
+
+        first = False
+
+      # The pipeline could still be stalled at some point if there is no
+      # final consumer of the data. We are required here to poll for
+      # data in order to prevent starvation.
+      if not poller:
+        poller = fds.poll()
+      else:
+        pollData(poller)
+
+      if not last:
+        _, status = waitpid(pid, 0)
+        if status != 0:
+          # One command failed. Do not start any more commands and
+          # indicate failure to the caller. He may try reading data from
+          # stderr (if any and if reading from it is enabled) and will
+          # raise an exception.
+          failed = formatCommands(command)
+          break
+      else:
+        # If we reached the last command in the spring we can just have
+        # it run in background and wait for it to finish later on -- no
+        # more serialization is required at that point.
+        pids += [pid]
+
+  if pipe_cmds:
+    close_(fd_in_new)
+    close_(fd_out_new)
+
+  assert poller
+  return pids, poller, failed
+
+
+def spring(commands, stdout=None, stderr=b""):
+  """Execute a series of commands and accumulate their output to a single destination."""
+  with defer() as later:
+    with defer() as here:
+      # A spring never receives any input from stdin, i.e., we always
+      # want it to be redirected from /dev/null.
+      fds = _PipelineFileDescriptors(later, here, None, stdout, stderr)
+      # When running the spring we need to alternate between spawning
+      # new processes and polling for data. In that scenario, we do not
+      # want the polling to block until we started processes for all
+      # commands passed in.
+      fds.blockable(False)
+
+      # Finally execute our spring and pass in the prepared file
+      # descriptors to use.
+      pids, poller, failed = _spring(commands, fds)
+
+    # We started all processes and will wait for them to finish. From
+    # now on we can allow any invocation of poll to block.
+    fds.blockable(True)
+
+    # Poll until there is no more data.
+    for _ in poller:
+      pass
+
+    data_out, data_err = fds.data()
+
+  _wait(pids, commands, data_err, failed=failed)
   return data_out, data_err

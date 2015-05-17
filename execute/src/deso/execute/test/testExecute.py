@@ -24,6 +24,7 @@ from deso.execute import (
   findCommand,
   formatCommands,
   pipeline as pipeline_,
+  spring as spring_
 )
 from deso.execute.execute_ import (
   eventToString,
@@ -47,6 +48,7 @@ from sys import (
 )
 from tempfile import (
   mktemp,
+  NamedTemporaryFile,
   TemporaryFile,
 )
 from textwrap import (
@@ -75,6 +77,11 @@ def execute(*args, stdin=None, stdout=None, stderr=None):
 def pipeline(commands, stdin=None, stdout=None, stderr=None):
   """Run a pipeline with reading from stderr disabled by default."""
   return pipeline_(commands, stdin=stdin, stdout=stdout, stderr=stderr)
+
+
+def spring(commands, stdout=None, stderr=None):
+  """Run a spring with reading from stderr disabled by default."""
+  return spring_(commands, stdout=stdout, stderr=stderr)
 
 
 class TestExecute(TestCase):
@@ -364,6 +371,97 @@ class TestExecute(TestCase):
         pipeline(commands)
 
       commands += [identity]
+
+
+  def testSpringNoOutput(self):
+    """Execute a spring without capturing its output."""
+    commands = [[_ECHO, "test1"], [_ECHO, "test2"]]
+
+    out, _ = spring([commands])
+    self.assertEqual(out, b"")
+
+
+  def testSpringReadOut(self):
+    """Execute a spring and verify that it produces the expected output."""
+    # TODO: This test occassionally fails. Find out why.
+    # ======================================================================
+    # FAIL: testSpringReadOut (testExecute.TestExecute)
+    # Execute a spring and verify that it produces the expected output.
+    # ----------------------------------------------------------------------
+    # Traceback (most recent call last):
+    #   File "src/btrfs/test/testExecute.py", line 414, in testSpringReadOut
+    #     self.assertEqual(out, bytes(expected, 'utf-8'))
+    # AssertionError: b'def\nabc\nghi\njkl\nmno\npqr\n' != b'abc\ndef\nghi\njkl\nmno\npqr\n'
+    commands = []
+
+    for text in ["abc", "def", "ghi", "jkl", "mno", "pqr", "stu", "vwx", "yz"]:
+      commands += [[_ECHO, text]]
+
+      out, _ = spring([commands], stdout=b"")
+      expected = "\n".join([t for _, t in commands]) + "\n"
+      self.assertEqual(out, bytes(expected, "utf-8"))
+
+
+  def testSpringReadWithPipeline(self):
+    """Execute a spring with a varying pipeline depth following it."""
+    identity = [_TR, "a", "a"]
+    commands = [
+      [[_ECHO, "suaaerr"], [_ECHO, "yippie"], [_ECHO, "wohoo"]],
+      [_TR, "a", "c"],
+      [_TR, "r", "s"],
+    ]
+
+    for _ in range(5):
+      commands += [identity]
+      output, _ = spring(commands, stdout=b"")
+
+      self.assertEqual(output, b"success\nyippie\nwohoo\n")
+
+
+  def testSpringError(self):
+    """Verify a spring behaves correctly in the face of a command error."""
+    path = mktemp()
+    regex = r"%s.*No such file or directory" % _CAT
+    benign = [_ECHO, "test2"]
+    faulty = [_CAT, path]
+
+    for cmd1, cmd2 in [(benign, faulty), (faulty, benign)]:
+      commands = [
+        [[_ECHO, "test1"], cmd1],
+        cmd2,
+      ]
+
+      with self.assertRaisesRegex(ChildProcessError, regex):
+        spring(commands, stderr=b"")
+
+
+  def testSpringWriteFileDescriptor(self):
+    """Execute a spring and redirect the accumulated output into a file."""
+    # It is important to disable buffering here, otherwise we might not
+    # be able to read back the data we just wrote when referencing the
+    # file by name (as opposed to the file descriptor).
+    with NamedTemporaryFile(buffering=0) as file_in1,\
+         NamedTemporaryFile(buffering=0) as file_in2,\
+         NamedTemporaryFile(buffering=0) as file_in3,\
+         NamedTemporaryFile(buffering=0) as file_out:
+      file_in1.write(b"file1\n")
+      file_in2.write(b"file2\n")
+      file_in3.write(b"file3")
+
+      commands = [
+        [_CAT, file_in1.name],
+        [_CAT, file_in2.name],
+        [_CAT, file_in3.name],
+      ]
+      spring([commands], stdout=file_out.fileno())
+
+      expected = b"file1\nfile2\nfile3"
+      file_out.seek(0)
+      self.assertEqual(file_out.read(), expected)
+
+
+  # TODO: We need more tests for the spring functionality, especially
+  #       with respect to the return values.
 
 
   def testBackgroundTaskIsWaited(self):
