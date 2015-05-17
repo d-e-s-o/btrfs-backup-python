@@ -22,7 +22,7 @@
 
 from deso.execute.execute_ import (
   execute,
-  formatPipeline,
+  formatCommands,
   pipeline,
 )
 from deso.execute.util import (

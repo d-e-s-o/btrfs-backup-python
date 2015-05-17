@@ -22,7 +22,7 @@
 from deso.execute import (
   execute as execute_,
   findCommand,
-  formatPipeline,
+  formatCommands,
   pipeline as pipeline_,
 )
 from deso.execute.execute_ import (
@@ -219,16 +219,65 @@ class TestExecute(TestCase):
         pipeline(commands, stderr=b"")
 
 
-  def testFormatPipeline(self):
+  def testFormatCommands(self):
     """Test conversion of a series of commands into a string."""
+    # Case 1) A single string that could potentially represent a
+    #         command. Note that strictly speaking it is not a command
+    #         in our sense and it could not be executed using the
+    #         'execute' functionality the way it is. We merely support
+    #         it because it "just works".
+    self.assertEqual(formatCommands(_ECHO), _ECHO)
+
+    # Case 2) A single command.
+    command = [_ECHO, "test"]
+    expected = "{echo} test".format(echo=_ECHO)
+    self.assertEqual(formatCommands(command), expected)
+
+    # Case 3) A very simplistic pipeline.
+    commands = [
+      [_ECHO, "test"],
+      [_ECHO, "test2"],
+    ]
+    expected = "{echo} test | {echo} test2".format(echo=_ECHO)
+    self.assertEqual(formatCommands(commands), expected)
+
+    # Case 4) A more complex pipeline.
     commands = [
       [_ECHO, "test"],
       [_TR, "t", "z"],
       [_TR, "z", "t"],
     ]
-    expected = "{echo} test | {tr} t z | {tr} z t".format(echo=_ECHO, tr=_TR)
+    expected = "{echo} test | {tr} t z | {tr} z t"
+    expected = expected.format(echo=_ECHO, tr=_TR)
+    self.assertEqual(formatCommands(commands), expected)
 
-    self.assertEqual(formatPipeline(commands), expected)
+    # Case 5) A spring without an additional pipeline after it.
+    commands = [
+      [["echo", "test"], ["echo", "test2"], ["echo", "test3"]],
+    ]
+    expected = "(echo test + echo test2 + echo test3)"
+    expected = expected.format(echo=_ECHO)
+    self.assertEqual(formatCommands(commands), expected)
+
+    # Case 6) A fairly complex spring. Note that in addition to the
+    #         spring part at the beginning we have another on in the
+    #         middle. Such a set of command would not be able to execute
+    #         properly using our 'spring' function, since this is a
+    #         non-standard command set layout. Again, we support it
+    #         because we would have to special case it in order to not
+    #         support it.
+    commands = [
+      [["/bin/echo", "suaaerr"], ["/bin/echo", "yippie"], ["/bin/echo", "wohoo"]],
+      ["/bin/tr", "a", "c"],
+      ["/bin/tr", "r", "s"],
+      [["/bin/echo", "suaaerr"], ["/bin/echo", "yippie"], ["/bin/echo", "wohoo"]],
+      ["/bin/tr", "a", "a"],
+    ]
+    expected = "(/bin/echo suaaerr + /bin/echo yippie + /bin/echo wohoo) | " +\
+               "/bin/tr a c | /bin/tr r s | " +\
+               "(/bin/echo suaaerr + /bin/echo yippie + /bin/echo wohoo) | " +\
+               "/bin/tr a a"
+    self.assertEqual(formatCommands(commands), expected)
 
 
   def testPipelineSingleProgram(self):

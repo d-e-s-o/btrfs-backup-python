@@ -56,7 +56,10 @@ from sys import (
 
 def execute(*args, stdin=None, stdout=None, stderr=b""):
   """Execute a program synchronously."""
-  return pipeline([args], stdin, stdout, stderr)
+  # Note that 'args' is a tuple. We do not want that so explicitly
+  # convert it into a list. Then create another list out of this one to
+  # effectively have a pipeline.
+  return pipeline([list(args)], stdin, stdout, stderr)
 
 
 def _pipeline(commands, fd_in, fd_out, fd_err):
@@ -118,9 +121,56 @@ def _pipeline(commands, fd_in, fd_out, fd_err):
   return pids
 
 
-def formatPipeline(commands):
-  """Convert a pipeline into a string."""
-  return " | ".join(map(" ".join, commands))
+def formatCommands(commands):
+  """Convert a command, pipeline, or spring into a string."""
+  def depth(l, d):
+    """Determine the maximum nesting depth of lists."""
+    if not isinstance(l, list):
+      return d
+
+    return max(map(lambda x: depth(x, d+1), l))
+
+  def transform(commands, depth):
+    """Transform a command or command list into a string."""
+    lookup = [
+      lambda x: " ".join(x),
+      lambda x: " ".join(x),
+      lambda x: " | ".join(x),
+      lambda x: "(%s)" % " + ".join(x),
+    ]
+    return lookup[depth](commands)
+
+  def stringify(commands, depth_now, depth_max):
+    """Convert a command or command list into a string.
+
+      We retrieve the pre-determined maximum nesting depth of the lists
+      in our command set as input parameter and use that as the base to
+      determine how to properly format the commands at each level.
+    """
+    # We have reached a string (or something else "atomic" in our
+    # sense). We can stop here.
+    if not isinstance(commands, list):
+      return commands, depth_now
+
+    strings = []
+    d = depth_max
+
+    for command in commands:
+      string, depth = stringify(command, depth_now + 1, depth_max)
+      strings += [string]
+      d = min(depth, d)
+
+    d = depth_max - d
+    return transform(strings, d), d
+
+  # We need to calculate the maximum depth of the command list given.
+  # Based on this knowledge we can later relate the current depth to the
+  # maximum depth in order to decide how to format a command or list of
+  # commands.
+  d = depth(commands, 0)
+  # Now convert the command list into a correctly formatted string.
+  s, _ = stringify(commands, 0, d)
+  return s
 
 
 def _wait(pids, commands, data_err):
@@ -152,7 +202,7 @@ def _wait(pids, commands, data_err):
 
     if status != 0 and not failed:
       # Only remember the first failure here, then continue clean up.
-      failed = formatPipeline([commands[i]])
+      failed = formatCommands([commands[i]])
 
   if failed:
     error = data_err.decode("utf-8") if data_err else None

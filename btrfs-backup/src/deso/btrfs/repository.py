@@ -49,7 +49,7 @@ from deso.btrfs.commands import (
 )
 from deso.execute import (
   execute,
-  formatPipeline,
+  formatCommands,
   pipeline,
 )
 from os import (
@@ -859,7 +859,7 @@ class FileRepository(RepositoryBase):
       """Replace the {file} string in a command with the actual snapshot name."""
       if not replaceFileString(command, snapshots):
         error = "Replacement string {{file}} not found in command: \"{cmd}\""
-        error = error.format(cmd=formatPipeline([command]))
+        error = error.format(cmd=formatCommands(command))
         raise NameError(error)
       else:
         return command
