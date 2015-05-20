@@ -20,6 +20,8 @@
 """Test the commands functionality."""
 
 from deso.btrfs.commands import (
+  checkFileString,
+  isSpring,
   replaceFileString,
 )
 from unittest import (
@@ -30,6 +32,36 @@ from unittest import (
 
 class TestRepositoryBase(TestCase):
   """Test basic repository functionality."""
+  def testSpringDetection(self):
+    """Verify we can properly detect springs."""
+    self.assertTrue(isSpring([["cat", "test"]]))
+    self.assertTrue(isSpring([["cat", "test"], ["tr", "a", "b"]]))
+
+    self.assertFalse(isSpring(["cat", "test"]))
+    self.assertFalse(isSpring(["cat", "test1", "test2", "test3"]))
+
+
+  def testCheckFileString(self):
+    """Verify that the checkFileString function works as expected."""
+    # Simple pipeline with {file} string.
+    command = ["cat", "{file}"]
+    self.assertTrue(checkFileString(command))
+
+    # Simple pipeline, no {file} string.
+    command = ["cat", "test"]
+    self.assertFalse(checkFileString(command))
+
+    # A spring with the {file} string in one command. Note that we
+    # explicitly allow for this string to be not only in the first
+    # command of the spring but any.
+    command = [["cat", "test"], ["cat", "{file}"]]
+    self.assertTrue(checkFileString(command))
+
+    # A spring with no {file} string.
+    command = [["cat", "test1"], ["cat", "test2"]]
+    self.assertFalse(checkFileString(command))
+
+
   def testReplaceFileString(self):
     """Verify that the replaceFileString function works as expected."""
     self.assertFalse(replaceFileString(["cat"], ["test"]), None)

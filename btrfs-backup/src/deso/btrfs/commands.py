@@ -20,6 +20,41 @@
 """Functionality related to handling commands in various forms."""
 
 
+def isSpring(command):
+  """Check if a command array actually describes a spring."""
+  return isinstance(command[0], list)
+
+
+def _checkFileStringInSpring(commands):
+  """Check if the given spring contains the "{file}" string."""
+  # We explicitly check all commands in the spring because we allow
+  # commands other than the first to contain the {file} string.
+  for command in commands:
+    if _checkFileStringInCommand(command):
+      return True
+
+  return False
+
+
+def _checkFileStringInCommand(command):
+  """Check if the given command contains the "{file}" string."""
+  # There are different ways the {file} string can be provided which
+  # depend on the command used. It might be part of a short option, a
+  # long option, or it can be a stand alone argument. We do not care
+  # as long as it does exist and so just create a string out of the
+  # respective filter command and scan it instead of inspecting every
+  # single argument of the command.
+  return "{file}" in " ".join(command)
+
+
+def checkFileString(command):
+  """Check if the given command contains the "{file}" string."""
+  if isSpring(command):
+    return _checkFileStringInSpring(command)
+  else:
+    return _checkFileStringInCommand(command)
+
+
 def replaceFileString(command, files):
   """Replace the {file} string in a command with the actual file name.
 

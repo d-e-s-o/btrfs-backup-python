@@ -26,6 +26,9 @@ from deso.btrfs.argv import (
   insert as insertArg,
   reorder as reorderArg,
 )
+from deso.btrfs.commands import (
+  checkFileString,
+)
 from sys import (
   argv as sysargv,
   stderr,
@@ -133,18 +136,12 @@ def checkSnapshotExtension(string, namespace, backup=True):
       error = "This option must be used in conjunction with --send-filter."
       raise ArgumentTypeError(error)
 
-  # There are different ways the {file} string can be provided which
-  # depend on the command used. It might be part of a short option, a
-  # long option, or it can be a stand alone argument. We do not care as
-  # long as it does exist and so just create a string out of the
-  # respective filter command and scan it instead of inspecting every
-  # single argument of the command.
   if backup:
-    if not "{file}" in " ".join(namespace.recv_filters[-1]):
+    if not checkFileString(namespace.recv_filters[-1]):
       error = "The last receive filter must contain the \"{file}\" string."
       raise ArgumentTypeError(error)
   else:
-    if not "{file}" in " ".join(namespace.send_filters[0]):
+    if not checkFileString(namespace.send_filters[0]):
       error = "The first send filter must contain the \"{file}\" string."
       raise ArgumentTypeError(error)
 
