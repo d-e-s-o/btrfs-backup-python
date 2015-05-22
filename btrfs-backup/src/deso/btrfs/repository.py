@@ -49,7 +49,6 @@ from deso.btrfs.commands import (
 )
 from deso.execute import (
   execute,
-  formatCommands,
   pipeline,
 )
 from os import (
@@ -855,22 +854,13 @@ class FileRepository(RepositoryBase):
 
   def _filterPipeline(self, index, snapshots):
     """Create a pipeline out of the filter commands."""
-    def replaceFiles(command, snapshots):
-      """Replace the {file} string in a command with the actual snapshot name."""
-      if not replaceFileString(command, snapshots):
-        error = "Replacement string {{file}} not found in command: \"{cmd}\""
-        error = error.format(cmd=formatCommands(command))
-        raise NameError(error)
-      else:
-        return command
-
     # Convert all relative snapshot paths into absolute ones with the
     # appropriate extension.
     with alias(self._extension) as ext:
       snapshots = ["%s%s" % (self.path(s), ext) for s in snapshots]
 
     commands = deepcopy(self._filters)
-    func = lambda: replaceFiles(commands[index], snapshots)
+    func = lambda: replaceFileString(commands[index], snapshots)
     # At least one command in the filters must contain a string {file}
     # which is now replaced by the actual snapshot name.
     commands[index] = self.command(func)
