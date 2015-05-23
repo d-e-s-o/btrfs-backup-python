@@ -24,6 +24,8 @@ from copy import (
 )
 from deso.execute import (
   formatCommands,
+  pipeline,
+  spring,
 )
 
 
@@ -140,3 +142,11 @@ def replaceFileString(command, files):
       raiseError([command])
 
   return command
+
+
+def runCommands(commands, stdout=None, stderr=b""):
+  """Run a list of commands as either a pipeline or a spring."""
+  if isSpring(commands[0]):
+    return spring(commands, stdout=stdout, stderr=stderr)
+  else:
+    return pipeline(commands, stdout=stdout, stderr=stderr)

@@ -46,10 +46,10 @@ from deso.btrfs.command import (
 )
 from deso.btrfs.commands import (
   replaceFileString,
+  runCommands,
 )
 from deso.execute import (
   execute,
-  pipeline,
 )
 from os import (
   curdir,
@@ -464,7 +464,7 @@ def _deploy(snapshot, parent, src, dst, src_snaps, subvolume):
   src_cmds = src.sendPipeline(snapshot, parents)
   dst_cmds = dst.recvPipeline(snapshot)
 
-  pipeline(src_cmds + dst_cmds, stderr=stderr)
+  runCommands(src_cmds + dst_cmds, stderr=stderr)
 
 
 def _sync(subvolume, src, dst):

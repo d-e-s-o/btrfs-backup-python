@@ -272,8 +272,10 @@ class TestMain(BtrfsTestCase):
 
       return execute(*command, **kwargs)
 
-    def pipelineWrapper(commands, *args, **kwargs):
-      """Wrapper around the pipeline function that stores the commands it executed."""
+    def runCommandsWrapper(commands, *args, **kwargs):
+      """Wrapper around the runCommands function that stores the commands it executed."""
+      # Note that we do not need to handle springs here because with the
+      # given options a spring will never be used.
       for command in commands:
         all_commands.append(command)
 
@@ -282,7 +284,7 @@ class TestMain(BtrfsTestCase):
 
     all_commands = []
     with patch("deso.btrfs.repository.execute", wraps=executeWrapper),\
-         patch("deso.btrfs.repository.pipeline", wraps=pipelineWrapper):
+         patch("deso.btrfs.repository.runCommands", wraps=runCommandsWrapper):
       with alias(self._mount) as m:
         subvolume = make(m, "subvol", subvol=True)
         snapshots = make(m, "snapshots")
