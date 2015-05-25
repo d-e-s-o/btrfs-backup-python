@@ -176,6 +176,26 @@ def addStandardArgs(parser):
 def addOptionalArgs(parser, namespace, backup):
   """Add the optional arguments to a parser."""
   parser.add_argument(
+    # In order to implement the --join option we use a trick: Since we
+    # cannot use a type field that performs an action for us as we do
+    # for the reverse-hidden-helper option (because this option does not
+    # accept an argument), we append the value 'None' to the
+    # 'send_filters' array that stores all send filters.
+    # TODO: Right now this option can be specified multiple times. That
+    #       is wrong and should not be allowed. However, it is tricky to
+    #       enforce that. Find a way.
+    "--join", action="append_const", const=[None], dest="send_filters",
+    help="Only allowed in conjunction with send filters. When specified, "\
+         "it does two things. First, it changes the default execution "\
+         "mode for the commands from a pipeline with a single source "\
+         "(origin of data) to one with multiple sources. Which means "\
+         "that the previous commands (filters) will be run in sequence "\
+         "and their output be accumulated into a single destination "\
+         "(rather than it being piped from one filter to the next). "\
+         "Secondly, all subsequent filters will have the data from this "\
+         "one source as their input.",
+  )
+  parser.add_argument(
     "--no-read-stderr", action="store_false", dest="read_err", default=True,
     help="Turn off reading of data from stderr. No information about "
          "the reason for a command failure except for the return code "
@@ -344,6 +364,26 @@ class SubLevelHelpFormatter(HelpFormatter):
 
 def prepareNamespace(ns):
   """Prepare the given namespace object for conversion into dict."""
+  def split(filters):
+    """Split a number of filters into an array of commands."""
+    return [f.split() for f in filters]
+
+  def prepare(filters):
+    """Prepare filters ready for use by the remaining parts of the program."""
+    # The filters array might contain a None element (if the --join
+    # option is used). In that case we set up the final array in a
+    # different way: the first element will be an array of filters (as
+    # opposed to a single filter).
+    if None in filters:
+      index = filters.index(None)
+      part1 = split(filters[:index])
+      part2 = split(filters[index+1:])
+
+      # Create a new array with the first element being an array itself.
+      return [part1] + part2
+    else:
+      return split(filters)
+
   command = ns.command
   src_repo = ns.src
   dst_repo = ns.dst
@@ -360,10 +400,15 @@ def prepareNamespace(ns):
     #       spaces in their path. E.g., "/bin/connect to server" would
     #       not be a valid command.
     remote_cmd = remote_cmd.split()
+
+  # Note that intuitively only the send filters can contain a None
+  # element in case the --join option is supplied. However, in case we
+  # have a --reverse option as well the filters could get swapped (which
+  # always happens after the insertion of the empty element).
   if send_filters:
-    send_filters = [filt.split() for filt in send_filters]
+    send_filters = prepare(send_filters)
   if recv_filters:
-    recv_filters = [filt.split() for filt in recv_filters]
+    recv_filters = prepare(recv_filters)
 
   ns.recv_filters = recv_filters
   ns.send_filters = send_filters

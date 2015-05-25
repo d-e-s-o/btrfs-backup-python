@@ -174,6 +174,10 @@ class TestMain(BtrfsTestCase):
     with self.assertRaisesRegex(ChildProcessError, regex):
       runMain("restore", "--snapshot-ext=gz", "--send-filter", "/bin/gzip")
 
+    # TODO: We should likely add a test to verify that the {file}
+    #       detection works in conjunction with springs and the --join
+    #       option.
+
     # This call succeeds from the point of view of supplying the
     # snapshot-ext option but other arguments are missing so we still
     # bail out.
