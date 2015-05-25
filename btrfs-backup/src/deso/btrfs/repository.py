@@ -587,7 +587,6 @@ def _purge(subvolume, repository, duration, snapshots):
   """Remove unused snapshots from a repository."""
   # Store the time we work with so that it does not change.
   now = datetime.now()
-  base = _snapshotBaseName(subvolume)
   snapshots = _findSnapshotsForSubvolume(snapshots, subvolume)
 
   # The list of snapshots is sorted in ascending order, that is, the
@@ -596,13 +595,21 @@ def _purge(subvolume, repository, duration, snapshots):
   # never be deleted.
   for snapshot in snapshots[:-1]:
     snapshot = snapshot["path"]
-    # The string is comprised of the base name, the separator '-', as
-    # well as the time stamp. Remove all but the time stamp.
-    string = snapshot[len(base)+1:]
+    time_str = _TIME_FORMAT_RAW
+    time_str = time_str.replace("{}", "%s{4,}" % _NUM_STRING, 1)
+    time_str = time_str.replace("{}", "%s{2}" % _NUM_STRING)
+    time_re = regex(r".*(%s)(?:-[0-9]\+){0,1}" % time_str)
 
+    m = time_re.match(snapshot)
+    if not m:
+      error = "Snapshot name does not contain a time stamp: \"{s}\""
+      error = error.format(s=snapshot)
+      raise ValueError(error)
+
+    timestamp, = m.groups()
     # Parse the time stamp into a datetime value and check whether it is
     # old enough so that the snapshot should be deleted.
-    time = datetime.strptime(string, _TIME_FORMAT)
+    time = datetime.strptime(timestamp, _TIME_FORMAT)
     if time + duration < now:
       cmd = repository.command(delete, repository.path(snapshot))
       execute(*cmd, stderr=repository.stderr)

@@ -845,6 +845,33 @@ class TestBtrfsSync(BtrfsTestCase):
         self.assertEqual(src.snapshots(), [most_recent])
 
 
+  def testRepositoryPurgeCorrectTimeStampParsing(self):
+    """Verify that we can purge enumerated snapshots."""
+    with patch("deso.btrfs.repository.datetime", wraps=datetime) as mock_now:
+      with alias(self._mount) as m:
+        now = datetime(2015, 3, 8, 18, 0, 1)
+        mock_now.now.return_value = now
+
+        subvolumes = [make(m, "subvol", subvol=True)]
+        src = Repository(make(m, "snapshots"))
+        dst = Repository(make(m, "backup"))
+
+        # Sync three times while having the time fixed. This way we get
+        # multiple enumerated snapshots with the same time stamp.
+        make(m, "subvol", "file1", data=b"test1")
+        syncRepos(subvolumes, src, dst)
+        make(m, "subvol", "file2", data=b"test2")
+        syncRepos(subvolumes, src, dst)
+        make(m, "subvol", "file3", data=b"test3")
+        syncRepos(subvolumes, src, dst)
+
+        mock_now.now.return_value = now + timedelta(minutes=5)
+        src.purge(subvolumes, timedelta(minutes=1))
+
+        # Only the last snapshot should remain.
+        self.assertEqual(len(src.snapshots()), 1)
+
+
   def runRelativeSubvolumeTest(self, file_repo):
     """Perform a sync and restore using only relative paths for repositories and subvolumes."""
     with defer() as d:
