@@ -221,6 +221,47 @@ $ btrfs-backup restore --snapshot-ext='bin'
                        --subvolume=subvolume/ backup/ snapshots/
 ```
 
+###Encrypting Backups Using GnuPG
+Backups may contain sensitive data and in some cases users might want
+to rely on a third-party service to store them rather than using their
+own infrastructure. The obvious solution to this problem is to encrypt
+the data and store it with the third party in an encrypted form.
+
+A program often used for encryption is GnuPG. Assuming the third party
+service can be accessed by SSH and that 'server' is the corresponding
+endpoint known to SSH, a backup could be performed using:
+
+```
+$ btrfs-backup backup --remote-cmd='/usr/bin/ssh server'
+                      --no-read-stderr
+                      --snapshot-ext=gpg
+                      --recv-filter='/usr/bin/gpg --no-random-seed-file
+                                                  --batch --encrypt
+                                                  --recipient=user-name'
+                      --recv-filter='/bin/dd of={file}'
+                      --subvolume=subvolume/ snapshots/ backup/
+```
+
+Note that we require two receive filters here. By design, only the last
+receive filter is executed on the remote host which means only this
+filter can write the encrypted data into a file. It will receive this
+data directly from GnuPG by means of the SSH channel.
+
+A restore could look like:
+
+```
+$ btrfs-backup restore --remote-cmd='/usr/bin/ssh server'
+                       --no-read-stderr
+                       --snapshot-ext=gpg
+                       --send-filter='/bin/dd if={file}'
+                       --send-filter='/usr/bin/gpg --no-random-seed-file
+                                                   --batch --decrypt'
+                       --subvolume=subvolume/ backup/ snapshots/
+```
+
+Similar to the backup case, only the first send filter is executed on
+the remote host, the decryption will happen locally.
+
 [1] For the technically interested person: the reason the program
     appears stalled is because in order to provide reasonable error
     messages, **btrfs-backup** reads data from stderr. In the SSH

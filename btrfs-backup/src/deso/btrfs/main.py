@@ -380,7 +380,7 @@ def prepareNamespace(ns):
       part2 = split(filters[index+1:])
 
       # Create a new array with the first element being an array itself.
-      return [part1] + part2
+      return [part1] + part2 if part1 else part2
     else:
       return split(filters)
 

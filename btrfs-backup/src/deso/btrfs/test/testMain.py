@@ -43,10 +43,15 @@ from deso.btrfs.test.btrfsTest import (
   Mount,
 )
 from deso.btrfs.test.util import (
+  NamedTemporaryFile,
   TemporaryDirectory,
+)
+from deso.cleanup import (
+  defer,
 )
 from deso.execute import (
   execute,
+  findCommand,
   pipeline,
 )
 from os.path import (
@@ -62,14 +67,16 @@ from sys import (
 )
 from unittest import (
   main,
+  SkipTest,
+  TestCase,
 )
 from unittest.mock import (
   patch,
 )
 
 
-class TestMain(BtrfsTestCase):
-  """A test case for testing of the progam's main functionality."""
+class TestMainOptions(TestCase):
+  """Test case for option handling in the main program."""
   def testDurationParsingSuccess(self):
     """Test duration parsing with some examples that must succeed."""
     self.assertEqual(duration("20S"), timedelta(seconds=20))
@@ -193,6 +200,8 @@ class TestMain(BtrfsTestCase):
               "--send-filter", "/bin/gzip")
 
 
+class TestMainMisc(BtrfsTestCase):
+  """A test case for testing of the progam's main functionality."""
   def testKeepFor(self):
     """Verify that using the --keep-for option old snapshots get deleted."""
     with patch("deso.btrfs.repository.datetime", wraps=datetime) as mock_now:
@@ -353,99 +362,185 @@ class TestMain(BtrfsTestCase):
           btrfsMain([argv[0]] + args.split())
 
 
-  def testRun(self):
+class TestMainRun(BtrfsTestCase):
+  """Test case invoking the btrfs-progam for end-to-end tests."""
+  def setUp(self):
+    """Create the test harness with two btrfs volumes."""
+    with defer() as d:
+      super().setUp()
+      d.defer(super().tearDown)
+
+      self._bdevice = BtrfsDevice()
+      d.defer(self._bdevice.destroy)
+
+      self._backup = Mount(self._bdevice.device())
+      d.defer(self._backup.destroy)
+
+      with alias(self._mount) as m,\
+           alias(self._backup) as b:
+        self._user = make(m, "home", "user", subvol=True)
+        self._root = make(m, "root", subvol=True)
+        self._snapshots = make(m, "snapshots")
+        self._backups = make(b, "backup")
+
+      d.release()
+
+
+  def tearDown(self):
+    """Unmount the backup device and destroy it."""
+    self._backup.destroy()
+    self._bdevice.destroy()
+
+    super().tearDown()
+
+
+  def wipeSubvolumes(self, path, pattern="*"):
+    """Remove all subvolumes in a given path (non recursively)."""
+    snapshots = glob(join(path, pattern))
+
+    for snapshot in snapshots:
+      execute(*delete(snapshot))
+
+    self.assertEqual(glob(join(path, pattern)), [])
+
+
+  def _run(self, command, src, dst, *options):
+    """Run the program to work on two subvolumes."""
+    args = [
+      command,
+      "-s", self._user,
+      "--subvolume=%s" % self._root,
+      src, dst
+    ]
+    result = btrfsMain([argv[0]] + args + list(options))
+    self.assertEqual(result, 0)
+
+
+  def backup(self, *options):
+    """Invoke the program to backup snapshots/subvolumes."""
+    self._run("backup", self._snapshots, self._backups, *options)
+
+
+  def restore(self, *options, reverse=False):
+    """Invoke the program to restore snapshots/subvolumes."""
+    if not reverse:
+      src = self._backups
+      dst = self._snapshots
+    else:
+      src = self._snapshots
+      dst = self._backups
+
+    self._run("restore", src, dst, *options)
+
+
+  def performTest(self, backup, restore):
     """Test a simple run of the program with two subvolumes."""
-    def wipeSubvolumes(path, pattern="*"):
-      """Remove all subvolumes in a given path (non recursively)."""
-      snapshots = glob(join(path, pattern))
+    with alias(self._mount) as m,\
+         alias(self._backup) as b:
+      make(m, "home", "user", "data", "movie.mp4", data=b"abcdefgh")
+      make(m, "root", ".ssh", "key.pub", data=b"1234567890")
 
-      for snapshot in snapshots:
-        execute(*delete(snapshot))
+      # Case 1) Run in ordinary fashion to backup data into a
+      #         separate btrfs backup volume.
+      backup()
+      self.assertEqual(len(glob(b.path("backup", "*"))), 2)
 
-      self.assertEqual(glob(join(path, pattern)), [])
+      # Case 2) Delete all created snapshots (really only the
+      #         snapshots for now) from our "source" and try
+      #         restoring them from the backup.
+      self.wipeSubvolumes(self._snapshots)
 
-    def run(command, src, dst, *options):
-      """Run the program to work on two subvolumes."""
-      args = [
-        command,
-        "-s", m.path("home", "user"),
-        "--subvolume=%s" % m.path("root"),
-        src, dst
+      restore("--snapshots-only")
+      user, root = glob(m.path("snapshots", "*"))
+
+      self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
+      self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
+
+      # Case 3) Once again delete all snapshots but this time
+      #         restore them in conjunction with the --reverse
+      #         option.
+      self.wipeSubvolumes(self._snapshots)
+
+      # This time we use the '--reverse' option.
+      restore("--reverse", "--snapshots-only", reverse=True)
+
+      user, root = glob(m.path("snapshots", "*"))
+
+      self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
+      self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
+
+      # Case 4) Also delete the original subvolumes we snapshotted
+      #         and verify that they can be restored as well.
+      self.wipeSubvolumes(m.path("home"))
+      self.wipeSubvolumes(m.path(), pattern="root")
+      self.wipeSubvolumes(m.path("snapshots"))
+
+      restore()
+
+      user, = glob(m.path("home", "user"))
+      root, = glob(m.path("root"))
+
+      self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
+      self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
+
+
+  def testNormalRun(self):
+    """Test backup and restore."""
+    self.performTest(self.backup, self.restore)
+
+
+  def testGpgRun(self):
+    """Test backup and restore with end-to-end encryption by GnuPG."""
+    # TODO: It could make sense to have the destination volume being
+    #       backed by a file system other than btrfs.
+    def backup(*options):
+      """Invoke the program to backup snapshots/subvolumes in an encrypted way."""
+      gpg_options = "--encrypt --no-default-keyring "\
+                    "--keyring={pubkey} --trust-model=always "\
+                    "--recipient=tester --batch --output={{file}}"
+      gpg_options = gpg_options.format(pubkey=public_key.name)
+      options = list(options)
+      options += [
+        "--snapshot-ext=gpg",
+        "--recv-filter=%s %s" % (GPG, gpg_options),
       ]
-      result = btrfsMain([argv[0]] + args + list(options))
-      self.assertEqual(result, 0)
-
-    def backup():
-      """Invoke the program to backup snapshots/subvolumes."""
-      run("backup", m.path("snapshots"), b.path("backup"))
+      self.backup(*options)
 
     def restore(*options, reverse=False):
-      """Invoke the program to restore snapshots/subvolumes."""
-      if not reverse:
-        src = b.path("backup")
-        dst = m.path("snapshots")
-      else:
-        src = m.path("snapshots")
-        dst = b.path("backup")
+      """Invoke the program to restore snapshots/subvolumes from an encrypted source."""
+      filt = "recv" if reverse else "send"
+      gpg_options = "--decrypt --no-default-keyring "\
+                    "--keyring={pubkey} --secret-keyring={privkey} "\
+                    "--trust-model=always --batch {{file}}"
+      gpg_options = gpg_options.format(pubkey=public_key.name,
+                                       privkey=private_key.name)
+      options = list(options)
+      options += [
+        "--snapshot-ext=gpg",
+        "--%s-filter=%s %s" % (filt, GPG, gpg_options),
+        "--join",
+      ]
+      self.restore(*options, reverse=reverse)
 
-      run("restore", src, dst, *options)
+    try:
+      GPG = findCommand("gpg")
+    except FileNotFoundError:
+      raise SkipTest("GnuPG not found")
 
-    with alias(self._mount) as m:
-      # We backup our data to a different btrfs volume.
-      with BtrfsDevice() as btrfs:
-        with Mount(btrfs.device()) as b:
-          make(m, "home", "user", subvol=True)
-          make(m, "home", "user", "data", "movie.mp4", data=b"abcdefgh")
-          make(m, "root", subvol=True)
-          make(m, "root", ".ssh", "key.pub", data=b"1234567890")
-          make(m, "snapshots")
-          make(b, "backup")
+    from deso.btrfs.test.gpg import PRIVATE_KEY, PUBLIC_KEY
 
-          # Case 1) Run in ordinary fashion to backup data into a
-          #         separate btrfs backup volume.
-          backup()
+    with NamedTemporaryFile() as public_key,\
+         NamedTemporaryFile() as private_key:
+      # First we need to convert our ASCII keys into binary ones (which
+      # reside in a file) for later usage. GnuPG can do that for us.
+      stdin = PUBLIC_KEY.encode("utf-8")
+      execute(GPG, "--dearmor", stdin=stdin, stdout=public_key.fileno())
 
-          user, root = glob(b.path("backup", "*"))
+      stdin = PRIVATE_KEY.encode("utf-8")
+      execute(GPG, "--dearmor", stdin=stdin, stdout=private_key.fileno())
 
-          self.assertContains(join(user, "data", "movie.mp4"), "abcdefgh")
-          self.assertContains(join(root, ".ssh", "key.pub"), "1234567890")
-
-          # Case 2) Delete all created snapshots (really only the
-          #         snapshots for now) from our "source" and try
-          #         restoring them from the backup.
-          wipeSubvolumes(m.path("snapshots"))
-          restore("--snapshots-only")
-
-          user, root = glob(m.path("snapshots", "*"))
-
-          self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
-          self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
-
-          # Case 3) Once again delete all snapshots but this time
-          #         restore them in conjunction with the --reverse
-          #         option.
-          wipeSubvolumes(m.path("snapshots"))
-
-          # This time we use the '--reverse' option.
-          restore("--reverse", "--snapshots-only", reverse=True)
-
-          user, root = glob(m.path("snapshots", "*"))
-
-          self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
-          self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
-
-          # Case 4) Also delete the original subvolumes we snapshotted
-          #         and verify that they can be restored as well.
-          wipeSubvolumes(m.path("home"))
-          wipeSubvolumes(m.path(), pattern="root")
-          wipeSubvolumes(m.path("snapshots"))
-          restore()
-
-          user, = glob(m.path("home", "user"))
-          root, = glob(m.path("root"))
-
-          self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
-          self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
+      # Invoke the test but have it run with the functions using GPG.
+      self.performTest(backup, restore)
 
 
 if __name__ == "__main__":
