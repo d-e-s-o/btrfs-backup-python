@@ -86,7 +86,6 @@ _ANY_STRING = r"."
 _NUM_STRING = r"[0-9]"
 _NUMS_STRING = r"{nr}+".format(nr=_NUM_STRING)
 _PATH_STRING = r"{any}+".format(any=_ANY_STRING)
-_FLAG_STRING = r"[A-Z|]+"
 # The format of a line as retrieved by executing the command returned by
 # the snapshots() function. Each line is expected to be following the
 # pattern:
@@ -99,17 +98,9 @@ _LIST_REGEX = regex(_LIST_STRING.format(nums=_NUMS_STRING, path=_PATH_STRING))
 # btrfs file system then it will end in 'is btrfs root'. We need to
 # detect this case to determine the btrfs root.
 _SHOW_IS_ROOT = "is btrfs root"
-# The format of a line as retrieved by executing the command returned by
-# the diff() function. Each line is expected to be following the
-# pattern:
-# inode A file offset B len C disk start D offset E gen F flags FLAGS PATH
-# We do not care about the FLAGS values. Apparently, they are always
-# uppercase and can be combined via '|' but we do not interpret them.
-_DIFF_STRING = (r"^inode {nums} file offset {nums} len {nums} disk start {nums}"
-                r" offset {nums} gen {nums} flags {flags} ({path})$")
-_DIFF_REGEX = regex(_DIFF_STRING.format(nums=_NUMS_STRING, flags=_FLAG_STRING,
-                                        path=_PATH_STRING))
-_DIFF_IGNORE = "transid marker"
+# The marker ending the file list reported by the diff() function. If
+# this marker is the only thing reported then no files have changed.
+_DIFF_END_MARKER = "transid marker"
 
 
 def _parseListLine(line):
@@ -124,16 +115,6 @@ def _parseListLine(line):
   result["gen"] = int(gen)
   result["path"] = path
   return result
-
-
-def _parseDiffLine(line):
-  """Parse a line of output for the command as returned by diff()."""
-  m = _DIFF_REGEX.match(line)
-  if not m:
-    raise ValueError("Invalid diff list: unable to match line \"%s\"" % line)
-
-  path, = m.groups()
-  return path
 
 
 def _snapshots(repository):
@@ -399,7 +380,7 @@ def _findOrCreate(subvolume, repository, snapshots):
   # If we found no snapshot or if files are changed between the current
   # state of the subvolume and the most recent snapshot we just found
   # then create a new snapshot.
-  if not snapshot or _diff(snapshot, subvolume, repository):
+  if not snapshot or _changed(snapshot, subvolume, repository):
     old = snapshot["path"] if snapshot else None
     new = _createSnapshot(subvolume, repository, snapshots)
     return new, old
@@ -558,8 +539,8 @@ def restore(subvolumes, src, dst, snapshots_only=False):
     _restore(realpath(subvolume), src, dst, snapshots, snapshots_only)
 
 
-def _diff(snapshot, subvolume, repository):
-  """Find the files that changed in a given subvolume with respect to a snapshot."""
+def _changed(snapshot, subvolume, repository):
+  """Check if a given subvolume was changed with respect to a snapshot."""
   # Because of an apparent bug in btrfs(8) (or a misunderstanding on my
   # side), we cannot use the generation reported for a snapshot to
   # create a diff of the files that changed *since* then. Rather, we
@@ -574,13 +555,11 @@ def _diff(snapshot, subvolume, repository):
   #       confirmation).
   cmd = repository.command(diff, subvolume, generation)
   output, _ = execute(*cmd, stdout=b"", stderr=repository.stderr)
-  output = output.decode("utf-8")[:-1].split("\n")
-  # The diff output usually is ended by a line such as:
-  # "transid marker was" followed by a generation ID. We should ignore
-  # those lines since we do not require this information. So filter
-  # them out here.
-  output = filter(lambda x: not x.startswith(_DIFF_IGNORE), output)
-  return [_parseDiffLine(line) for line in output]
+  # Do not decode the bytes object into a string. We cannot be sure of
+  # the encoding. Although we could use sys.getfilesystemencoding() to
+  # get the encoding used in the file system, cases were seen where file
+  # names still contained undecodable characters (such as 0xbb).
+  return not output.startswith(_DIFF_END_MARKER.encode("utf-8"))
 
 
 def _purge(subvolume, repository, duration, snapshots):
@@ -758,8 +737,8 @@ class Repository(RepositoryBase):
       _purge(realpath(subvolume), self, duration, snapshots)
 
 
-  def diff(self, snapshot, subvolume):
-    """Find the files that changed in a given subvolume with respect to a snapshot."""
+  def changed(self, snapshot, subvolume):
+    """Check if a given subvolume was changed with respect to a snapshot."""
     # We are given a snapshot but we need a full snapshot entry
     # containing the name and the generation ID. So retrieve the list of
     # available snapshots and find the given one. A nice side effect is
@@ -768,7 +747,7 @@ class Repository(RepositoryBase):
     if not found:
       raise FileNotFoundError("Snapshot not found: \"%s\"" % snapshot)
 
-    return _diff(found, subvolume, self)
+    return _changed(found, subvolume, self)
 
 
   def parents(self, _, subvolume, snapshots=None, dst_snapshots=None):

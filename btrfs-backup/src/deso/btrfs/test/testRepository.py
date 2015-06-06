@@ -347,13 +347,13 @@ class TestRepository(BtrfsRepositoryTestCase):
     self.assertEqual(snap2["path"], "root_snapshot2")
 
 
-  def testRepositoryEmptyDiff(self):
-    """Verify that an empty diff is reported on a fresh snapshot."""
+  def testRepositoryNoFileChanged(self):
+    """Verify that on a fresh snapshot the correponding subvolume is reported as unchanged."""
     with alias(self._repository) as r:
-      self.assertEqual(r.diff("root_snapshot", r.path("root")), [])
+      self.assertFalse(r.changed("root_snapshot", r.path("root")))
 
 
-  def testRepositoryEmptyFileNotInDiff(self):
+  def testRepositoryNoChangeDueToEmptyFile(self):
     """Check whether a newly created empty file is reported by diff().
 
       The find-new functionality provided by btrfs apparently does not
@@ -368,45 +368,25 @@ class TestRepository(BtrfsRepositoryTestCase):
       make(r, "root", "file3", data=b"")
       make(r, "root", "file4", data=b"")
 
-      self.assertEqual(r.diff("root_snapshot", r.path("root")), [])
+      self.assertFalse(r.changed("root_snapshot", r.path("root")))
       self.assertTrue(isfile(r.path("root", "file2")))
 
 
-  def testRepositoryDiff(self):
-    """Verify that we can retrieve a list of changed files for a subvolume."""
-    with alias(self._repository) as r:
-      # Write something into the existing file to have it contain
-      # changes over the snapshot.
-      with open(r.path("root", "file"), "w") as f:
-        f.write("\0")
-
-      # Also create a new file with some content.
-      make(r, "root", "dir", "file2", data=b"test-data")
-
-      files = r.diff("root_snapshot", r.path("root"))
-      # We cannot tell for sure the order in which the files appear so use
-      # a set here.
-      expected = {"file", join("dir", "file2")}
-
-      self.assertEqual(set(files), expected)
-
-
-  def testRepositoryDiffNoDiffAfterSnapshot(self):
-    """Verify that after taking a snapshot the reported diff is empty."""
+  def testRepositoryNoChangeAfterSnapshot(self):
+    """Verify that after taking a snapshot the subvolume is reported as unchanged."""
     with alias(self._repository) as r:
       # Create a file with actual content.
       make(r, "root", "dir", "file2", data=b"test-data")
 
-      expected = [join("dir", "file2")]
-      self.assertEqual(r.diff("root_snapshot", r.path("root")), expected)
+      self.assertTrue(r.changed("root_snapshot", r.path("root")))
 
-      # After taking another snapshot the file must no longer be
-      # reported as changed.
+      # After taking another snapshot we must no longer see a change
+      # between the most recent snapshot and the subvolume.
       execute(*snapshot(r.path("root"), r.path("root_snapshot2")))
-      self.assertEqual(r.diff("root_snapshot2", r.path("root")), [])
+      self.assertFalse(r.changed("root_snapshot2", r.path("root")))
 
 
-  def testRepositoryDiffDeletion(self):
+  def testRepositoryNoChangeOnFileDeletion(self):
     """Check whether deleted files in a subvolume are reported by diff().
 
       This test case checks that files that are present in a snapshot
@@ -418,7 +398,7 @@ class TestRepository(BtrfsRepositoryTestCase):
     with alias(self._repository) as r:
       remove(r.path("root", "file"))
 
-      self.assertEqual(r.diff("root_snapshot", r.path("root")), [])
+      self.assertFalse(r.changed("root_snapshot", r.path("root")))
 
 
 class TestBtrfsSync(BtrfsTestCase):
@@ -907,7 +887,7 @@ class TestBtrfsSync(BtrfsTestCase):
         snap, = src.snapshots()
         make(m, "root", "file1", data=b"test")
         # Next the changed file detection.
-        self.assertNotEqual(src.diff(snap["path"], subvolume), [])
+        self.assertTrue(src.changed(snap["path"], subvolume))
 
         # We need a second snapshot to test purging.
         syncRepos([subvolume], src, dst)
