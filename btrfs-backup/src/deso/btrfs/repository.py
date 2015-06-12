@@ -221,22 +221,23 @@ def _findRoot(directory, repository):
   """Find the root of the btrfs file system containing the given directory."""
   assert directory
 
+  cur_directory = directory
   # Note that we have no guard here against an empty directory as input
   # or later because of a dirname invocation. However, the show command
   # in _isRoot will fail for an empty directory (a case that will also
   # be hit if this function is run on a non-btrfs file system).
-  while not _isRoot(directory, repository):
-    new_directory = dirname(directory)
+  while not _isRoot(cur_directory, repository):
+    new_directory = dirname(cur_directory)
 
     # Executing a dirname on the root directory ('/') just returns the
     # root directory. Guard against endless loops.
-    if new_directory == directory:
+    if new_directory == cur_directory:
       raise FileNotFoundError("Root of btrfs file system not found for "
                               "directory: \"%s\"" % directory)
 
-    directory = new_directory
+    cur_directory = new_directory
 
-  return directory
+  return cur_directory
 
 
 def _snapshotBaseName(subvolume):

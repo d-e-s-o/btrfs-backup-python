@@ -39,6 +39,7 @@ from deso.btrfs.repository import (
   Repository,
   restore,
   _findCommonSnapshots,
+  _findRoot,
   _relativize,
   _snapshots,
   sync as syncRepos,
@@ -109,6 +110,22 @@ class TestRepositoryBase(BtrfsTestCase):
     self.assertEqual(_relativize("test/"), "./test/")
     self.assertEqual(_relativize("../test/"), "../test/")
     self.assertEqual(_relativize("~/test"), "~/test")
+
+
+  def testFindRootCorrectDirectory(self):
+    """Verify that in case of an error _findRoot reports the proper directory."""
+    directory = self._mount.path("non-existent-directory")
+    regex = r"Root of btrfs.*not found.*: \"%s\"" % directory
+    repo = Repository(self._mount.path())
+
+    with patch("deso.btrfs.repository._isRoot") as mock_isroot:
+      # We cannot be sure that the root directory ('/') is not on a
+      # btrfs file system. So we mock the _isRoot function to make sure
+      # it is not reported as being btrfs.
+      mock_isroot.return_value = False
+
+      with self.assertRaisesRegex(FileNotFoundError, regex):
+        _findRoot(directory, repo)
 
 
   def testRepositoryInNonExistentDirectory(self):
