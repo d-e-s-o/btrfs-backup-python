@@ -416,24 +416,17 @@ class TestMainRun(BtrfsTestCase):
     self.assertEqual(result, 0)
 
 
-  def backup(self, *options):
+  def backup(self, src, dst, *options):
     """Invoke the program to backup snapshots/subvolumes."""
-    self._run("backup", self._snapshots, self._backups, *options)
+    self._run("backup", src, dst, *options)
 
 
-  def restore(self, *options, reverse=False):
+  def restore(self, src, dst, *options, **kwargs):
     """Invoke the program to restore snapshots/subvolumes."""
-    if not reverse:
-      src = self._backups
-      dst = self._snapshots
-    else:
-      src = self._snapshots
-      dst = self._backups
-
     self._run("restore", src, dst, *options)
 
 
-  def performTest(self, backup, restore):
+  def performTest(self, backup, restore, src, dst):
     """Test a simple run of the program with two subvolumes."""
     with alias(self._mount) as m,\
          alias(self._backup) as b:
@@ -442,7 +435,7 @@ class TestMainRun(BtrfsTestCase):
 
       # Case 1) Run in ordinary fashion to backup data into a
       #         separate btrfs backup volume.
-      backup()
+      backup(src, dst)
       self.assertEqual(len(glob(b.path("backup", "*"))), 2)
 
       # Case 2) Delete all created snapshots (really only the
@@ -450,7 +443,7 @@ class TestMainRun(BtrfsTestCase):
       #         restoring them from the backup.
       self.wipeSubvolumes(self._snapshots)
 
-      restore("--snapshots-only")
+      restore(dst, src, "--snapshots-only")
       user, root = glob(m.path("snapshots", "*"))
 
       self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
@@ -462,7 +455,7 @@ class TestMainRun(BtrfsTestCase):
       self.wipeSubvolumes(self._snapshots)
 
       # This time we use the '--reverse' option.
-      restore("--reverse", "--snapshots-only", reverse=True)
+      restore("--reverse", "--snapshots-only", src, dst, reverse=True)
 
       user, root = glob(m.path("snapshots", "*"))
 
@@ -475,7 +468,7 @@ class TestMainRun(BtrfsTestCase):
       self.wipeSubvolumes(m.path(), pattern="root")
       self.wipeSubvolumes(m.path("snapshots"))
 
-      restore()
+      restore(dst, src)
 
       user, = glob(m.path("home", "user"))
       root, = glob(m.path("root"))
@@ -486,14 +479,14 @@ class TestMainRun(BtrfsTestCase):
 
   def testNormalRun(self):
     """Test backup and restore."""
-    self.performTest(self.backup, self.restore)
+    self.performTest(self.backup, self.restore, self._snapshots, self._backups)
 
 
   def testGpgRun(self):
     """Test backup and restore with end-to-end encryption by GnuPG."""
     # TODO: It could make sense to have the destination volume being
     #       backed by a file system other than btrfs.
-    def backup(*options):
+    def backup(src, dst, *options):
       """Invoke the program to backup snapshots/subvolumes in an encrypted way."""
       gpg_options = "--encrypt --no-default-keyring "\
                     "--keyring={pubkey} --trust-model=always "\
@@ -504,9 +497,9 @@ class TestMainRun(BtrfsTestCase):
         "--snapshot-ext=gpg",
         "--recv-filter=%s %s" % (GPG, gpg_options),
       ]
-      self.backup(*options)
+      self.backup(src, dst, *options)
 
-    def restore(*options, reverse=False):
+    def restore(src, dst, *options, reverse=False):
       """Invoke the program to restore snapshots/subvolumes from an encrypted source."""
       filt = "recv" if reverse else "send"
       gpg_options = "--decrypt --no-default-keyring "\
@@ -520,7 +513,7 @@ class TestMainRun(BtrfsTestCase):
         "--%s-filter=%s %s" % (filt, GPG, gpg_options),
         "--join",
       ]
-      self.restore(*options, reverse=reverse)
+      self.restore(src, dst, *options, reverse=reverse)
 
     try:
       GPG = findCommand("gpg")
@@ -540,7 +533,7 @@ class TestMainRun(BtrfsTestCase):
       execute(GPG, "--dearmor", stdin=stdin, stdout=private_key.fileno())
 
       # Invoke the test but have it run with the functions using GPG.
-      self.performTest(backup, restore)
+      self.performTest(backup, restore, self._snapshots, self._backups)
 
 
 if __name__ == "__main__":
