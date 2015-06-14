@@ -43,6 +43,7 @@ from deso.btrfs.test.btrfsTest import (
   Mount,
 )
 from deso.btrfs.test.util import (
+  mkdtemp,
   NamedTemporaryFile,
   TemporaryDirectory,
 )
@@ -53,6 +54,10 @@ from deso.execute import (
   execute,
   findCommand,
   pipeline,
+)
+from os import (
+  environ,
+  rmdir,
 )
 from os.path import (
   extsep,
@@ -362,36 +367,20 @@ class TestMainMisc(BtrfsTestCase):
           btrfsMain([argv[0]] + args.split())
 
 
-class TestMainRun(BtrfsTestCase):
-  """Test case invoking the btrfs-progam for end-to-end tests."""
+class TestMainRunBase(BtrfsTestCase):
+  """Test case base class for btrfs-backup end-to-end tests."""
   def setUp(self):
-    """Create the test harness with two btrfs volumes."""
+    """Create the test harness with a single btrfs volume and some data."""
     with defer() as d:
       super().setUp()
       d.defer(super().tearDown)
 
-      self._bdevice = BtrfsDevice()
-      d.defer(self._bdevice.destroy)
-
-      self._backup = Mount(self._bdevice.device())
-      d.defer(self._backup.destroy)
-
-      with alias(self._mount) as m,\
-           alias(self._backup) as b:
+      with alias(self._mount) as m:
         self._user = make(m, "home", "user", subvol=True)
         self._root = make(m, "root", subvol=True)
         self._snapshots = make(m, "snapshots")
-        self._backups = make(b, "backup")
 
       d.release()
-
-
-  def tearDown(self):
-    """Unmount the backup device and destroy it."""
-    self._backup.destroy()
-    self._bdevice.destroy()
-
-    super().tearDown()
 
 
   def wipeSubvolumes(self, path, pattern="*"):
@@ -428,15 +417,14 @@ class TestMainRun(BtrfsTestCase):
 
   def performTest(self, backup, restore, src, dst):
     """Test a simple run of the program with two subvolumes."""
-    with alias(self._mount) as m,\
-         alias(self._backup) as b:
+    with alias(self._mount) as m:
       make(m, "home", "user", "data", "movie.mp4", data=b"abcdefgh")
       make(m, "root", ".ssh", "key.pub", data=b"1234567890")
 
       # Case 1) Run in ordinary fashion to backup data into a
-      #         separate btrfs backup volume.
+      #         separate btrfs backup volume. Result is verified
+      #         by the restore operation later on.
       backup(src, dst)
-      self.assertEqual(len(glob(b.path("backup", "*"))), 2)
 
       # Case 2) Delete all created snapshots (really only the
       #         snapshots for now) from our "source" and try
@@ -477,6 +465,32 @@ class TestMainRun(BtrfsTestCase):
       self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
 
 
+class TestLocalMainRun(TestMainRunBase):
+  """Test case invoking the btrfs-progam for end-to-end tests with a local backup repository."""
+  def setUp(self):
+    """Create a btrfs device for the backups."""
+    with defer() as d:
+      super().setUp()
+      d.defer(super().tearDown)
+
+      self._bdevice = BtrfsDevice()
+      d.defer(self._bdevice.destroy)
+
+      self._backup = Mount(self._bdevice.device())
+      d.defer(self._backup.destroy)
+
+      self._backups = make(self._backup, "backup")
+      d.release()
+
+
+  def tearDown(self):
+    """Unmount the backup device and destroy it."""
+    self._backup.destroy()
+    self._bdevice.destroy()
+
+    super().tearDown()
+
+
   def testNormalRun(self):
     """Test backup and restore."""
     self.performTest(self.backup, self.restore, self._snapshots, self._backups)
@@ -514,7 +528,6 @@ class TestMainRun(BtrfsTestCase):
         "--join",
       ]
       self.restore(src, dst, *options, reverse=reverse)
-
     try:
       GPG = findCommand("gpg")
     except FileNotFoundError:
@@ -533,6 +546,79 @@ class TestMainRun(BtrfsTestCase):
       execute(GPG, "--dearmor", stdin=stdin, stdout=private_key.fileno())
 
       # Invoke the test but have it run with the functions using GPG.
+      self.performTest(backup, restore, self._snapshots, self._backups)
+
+
+class TestRemoteMainRun(TestMainRunBase):
+  """Test case invoking the btrfs-progam for end-to-end tests with a remote backup repository."""
+  def setUp(self):
+    """Determine a directory to use on the remote host."""
+    def tmpdirpath():
+      """Get the path to a temporary directory that does not exist.
+
+        Note: tempfile.mktemp provides a superset of the functionality
+              this function provides but got deprecated.
+      """
+      d = mkdtemp()
+      rmdir(d)
+      return d
+
+    with defer() as d:
+      super().setUp()
+      d.defer(super().tearDown)
+
+      self._backups = join(tmpdirpath(), "backup")
+      d.release()
+
+
+  # TODO: We still require a test that backs up data to a native remote
+  #       repository. However, that requires a btrfs file system to
+  #       exist at a particular location on the remote host which is not
+  #       so trivial to have.
+
+
+  def testSshRun(self):
+    """Test backup and restore over an SSH connection to a remote host."""
+    def backup(*options):
+      """Invoke the program to backup snapshots/subvolumes to a remote host."""
+      options = list(options)
+      options += [
+        "--remote-cmd=/usr/bin/ssh %s" % host,
+        "--snapshot-ext=bin",
+        "--recv-filter=/bin/dd of={file}",
+        "--no-read-stderr",
+      ]
+      self.backup(*options)
+
+    def restore(src, dst, *options, reverse=False):
+      """Invoke the program to restore snapshots/subvolumes from a remote host."""
+      filt = "recv" if reverse else "send"
+      options = list(options)
+      options += [
+        "--remote-cmd=/usr/bin/ssh %s" % host,
+        "--snapshot-ext=bin",
+        "--%s-filter=/bin/dd if={file}" % filt,
+        "--no-read-stderr",
+      ]
+      self.restore(src, dst, *options, reverse=reverse)
+
+    try:
+      SSH = findCommand("ssh")
+    except FileNotFoundError:
+      raise SkipTest("SSH not found")
+
+    try:
+      host = environ["TEST_SSH_HOST"]
+    except KeyError:
+      raise SkipTest("TEST_SSH_HOST environment variable not set")
+
+    with defer() as d:
+      # This part is a bit tricky. We do not know the directory
+      # structure on the remote host. We only have a path that is unique
+      # on our local machine. We try to create it on the remote host to
+      # work on it later on.
+      execute(SSH, host, "mkdir -p %s" % self._backups, stderr=None)
+      d.defer(lambda: execute(SSH, host, "rm -r %s" % self._backups, stderr=None))
       self.performTest(backup, restore, self._snapshots, self._backups)
 
 
