@@ -83,6 +83,56 @@ from sys import (
 )
 
 
+class ProcessError(ChildProcessError):
+  """A class enhancing OSError with proper attributes for our use case.
+
+    The OSError attributes errno, filename, and filename2 do not really
+    describe our use case. Most importantly, however, OSError does not
+    interpret the filename arguments in any way, meaning newline
+    characters will be printed directly as '\n' instead of resulting in
+    a line break.
+  """
+  def __init__(self, status, name, stderr=None):
+    super().__init__()
+
+    self._status = status
+    self._name = name
+    self._stderr = stderr
+
+
+  def __str__(self):
+    """Convert the error into a human readable string."""
+    s = "[Status {status:d}] {name}"
+    if self._stderr:
+      s += ": '{stderr}'"
+
+    # Note that even if _stderr is None (and the string does not contain
+    # the {stderr} string) we can apply the formatting for this key
+    # anyways.
+    s = s.format(status=self._status,
+                 name=self._name,
+                 stderr=self._stderr)
+    return s
+
+
+  @property
+  def status(self):
+    """Retrieve the status code of the failed process."""
+    return self._status
+
+
+  @property
+  def name(self):
+    """Retrieve the name/command of the process that failed."""
+    return self._name
+
+
+  @property
+  def stderr(self):
+    """Retrieve the stderr output, if any, of the process that failed."""
+    return self._stderr
+
+
 def execute(*args, stdin=None, stdout=None, stderr=b""):
   """Execute a program synchronously."""
   # Note that 'args' is a tuple. We do not want that so explicitly
@@ -242,7 +292,7 @@ def _wait(pids, commands, data_err, failed=None):
 
   if failed:
     error = data_err.decode("utf-8") if data_err else None
-    raise ChildProcessError(status, failed, error)
+    raise ProcessError(status, failed, error)
 
 
 def _write(data):

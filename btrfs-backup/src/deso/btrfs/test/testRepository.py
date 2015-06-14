@@ -60,6 +60,7 @@ from deso.cleanup import (
 from deso.execute import (
   execute,
   findCommand,
+  ProcessError,
 )
 from glob import (
   glob,
@@ -431,7 +432,7 @@ class TestBtrfsSync(BtrfsTestCase):
       src = Repository(snaps)
       dst = Repository(backup)
 
-      with self.assertRaisesRegex(ChildProcessError, regex):
+      with self.assertRaisesRegex(ProcessError, regex):
         syncRepos([m.path(directory)], src, dst)
 
       self.assertEqual(glob(join(snaps, "*")), [])
@@ -755,7 +756,7 @@ class TestBtrfsSync(BtrfsTestCase):
     #         decompressed by bzip2 which is bound to fail. This is our
     #         way of verifying that actual compression and decompression
     #         happens.
-    with self.assertRaises(ChildProcessError):
+    with self.assertRaises(ProcessError):
       syncAndRestore(send_filters, list(reversed(recv_filters)))
 
     # Case 3) Sync and restore with properly ordered filters. Everything
@@ -787,7 +788,7 @@ class TestBtrfsSync(BtrfsTestCase):
       make(m, "root", data=b"root")
 
       regex = r"%s.*exists and it is not a directory" % m.path("root")
-      with self.assertRaisesRegex(ChildProcessError, regex):
+      with self.assertRaisesRegex(ProcessError, regex):
         restore([m.path("root")], bak, src)
 
 

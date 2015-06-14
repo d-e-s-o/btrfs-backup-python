@@ -29,6 +29,9 @@ from deso.btrfs.argv import (
 from deso.btrfs.commands import (
   checkFileString,
 )
+from deso.execute import (
+  ProcessError,
+)
 from sys import (
   argv as sysargv,
   stderr,
@@ -83,7 +86,7 @@ def run(method, subvolumes, src_repo, dst_repo, debug=False, **kwargs):
     program = Program(subvolumes, src_repo, dst_repo)
     method(program)(**kwargs)
     return 0
-  except ChildProcessError as e:
+  except ProcessError as e:
     if debug:
       raise
     print("Execution failure:\n\"%s\"" % e, file=stderr)

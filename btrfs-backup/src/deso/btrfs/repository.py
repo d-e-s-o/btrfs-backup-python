@@ -50,6 +50,7 @@ from deso.btrfs.commands import (
 )
 from deso.execute import (
   execute,
+  ProcessError,
 )
 from os import (
   curdir,
@@ -190,7 +191,7 @@ def _isRoot(directory, repository):
 
       execute(*cmd, stderr=repository.stderr)
       return True
-    except ChildProcessError:
+    except ProcessError:
       return False
 
   # TODO: We might want to move this invocation into _findRoot to avoid
@@ -210,7 +211,7 @@ def _isRoot(directory, repository):
     # actually succeeds), and in case of the root directory it will be
     # matched here.
     return len(output) == 1 and output[0].endswith(_SHOW_IS_ROOT)
-  except ChildProcessError:
+  except ProcessError:
     # Starting with btrfs-progs-3.17.3 the show command will return an
     # error code in case the supplied directory is not a btrfs
     # subvolume which will manifest as an exception here.

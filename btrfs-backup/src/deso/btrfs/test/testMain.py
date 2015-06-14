@@ -54,6 +54,7 @@ from deso.execute import (
   execute,
   findCommand,
   pipeline,
+  ProcessError,
 )
 from os import (
   environ,
@@ -105,7 +106,7 @@ class TestMainOptions(TestCase):
   def testInvokeNoArguments(self):
     """Verify the intended output is printed when the program is run without arguments."""
     regex = "the following arguments are required"
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       execute(executable, "-m", "deso.btrfs.main")
 
 
@@ -139,7 +140,7 @@ class TestMainOptions(TestCase):
         runMain(*args)
         # The command should fail due to missing arguments.
         self.assertFalse(True)
-      except ChildProcessError as e:
+      except ProcessError as e:
         string = str(e)
 
       self.assertRegex(string, "Usage:")
@@ -175,15 +176,15 @@ class TestMainOptions(TestCase):
       execute(executable, "-m", "deso.btrfs.main", *args)
 
     regex = r"Extension must not start"
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       runMain("backup", "--snapshot-ext=%senc" % extsep)
 
     regex = r"The last receive filter must contain"
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       runMain("backup", "--snapshot-ext=gz", "--recv-filter", "/bin/gzip")
 
     regex = r"The first send filter must contain"
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       runMain("restore", "--snapshot-ext=gz", "--send-filter", "/bin/gzip")
 
     # TODO: We should likely add a test to verify that the {file}
@@ -194,12 +195,12 @@ class TestMainOptions(TestCase):
     # snapshot-ext option but other arguments are missing so we still
     # bail out.
     regex = r"arguments are required"
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       runMain("backup", "--snapshot-ext=gz", "--recv-filter=/bin/gzip",
               "--recv-filter", "/bin/dd of={file}")
 
     regex = r"arguments are required"
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       runMain("restore", "--snapshot-ext=gz",
               "--send-filter=/bin/dd if={file}",
               "--send-filter", "/bin/gzip")
@@ -363,7 +364,7 @@ class TestMainMisc(BtrfsTestCase):
         # followed by an error string containing the program's stderr
         # output.
         regex = r"subvol-2015-01-29_20:59:00$"
-        with self.assertRaisesRegex(ChildProcessError, regex):
+        with self.assertRaisesRegex(ProcessError, regex):
           btrfsMain([argv[0]] + args.split())
 
 

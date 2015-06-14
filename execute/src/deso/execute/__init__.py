@@ -24,6 +24,7 @@ from deso.execute.execute_ import (
   execute,
   formatCommands,
   pipeline,
+  ProcessError,
   spring,
 )
 from deso.execute.util import (

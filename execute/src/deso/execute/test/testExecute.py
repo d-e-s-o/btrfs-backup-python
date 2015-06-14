@@ -24,6 +24,7 @@ from deso.execute import (
   findCommand,
   formatCommands,
   pipeline as pipeline_,
+  ProcessError,
   spring as spring_
 )
 from deso.execute.execute_ import (
@@ -86,6 +87,29 @@ def spring(commands, stdout=None, stderr=None):
 
 class TestExecute(TestCase):
   """A test case for command execution functionality."""
+  def testProcessErrorNoStderr(self):
+    """Verify that when not reading stderr output we get a rather generic error report."""
+    tmp_file = mktemp()
+    regex = r"^\[Status [0-9]+\] %s %s$" % (_CAT, tmp_file)
+
+    with self.assertRaisesRegex(ProcessError, regex):
+      # Do not read from stderr here.
+      execute(_CAT, tmp_file)
+
+
+  def testProcessErrorFormattingStderr(self):
+    """Verify that the ProcessError class properly handles new lines."""
+    tmp_file = mktemp()
+    # Note that when using ChildProcessError the newline would not
+    # appear as a true newline but rather as the actual text '\n' (i.e.,
+    # \\n in a string). With ProcessError we are supposed to get a
+    # properly interpreted newline.
+    regex = r".*No such file or directory\n"
+
+    with self.assertRaisesRegex(ProcessError, regex):
+      execute(_CAT, tmp_file, stderr=b"")
+
+
   def testExecuteErrorEventToStringSingle(self):
     """Verify that our event to string conversion works as expected."""
     self.assertEqual(eventToString(POLLERR),  "ERR")
@@ -152,7 +176,7 @@ class TestExecute(TestCase):
     regex = r"No such file or directory"
 
     with TemporaryFile() as file_:
-      with self.assertRaises(ChildProcessError):
+      with self.assertRaises(ProcessError):
         execute(_CAT, path, stderr=file_.fileno())
 
       file_.seek(0)
@@ -184,7 +208,7 @@ class TestExecute(TestCase):
 
   def testExecuteThrowsOnCommandFailure(self):
     """Verify that a failing command causes an exception to be raised."""
-    with self.assertRaises(ChildProcessError):
+    with self.assertRaises(ProcessError):
       execute(_FALSE)
 
 
@@ -196,14 +220,14 @@ class TestExecute(TestCase):
     with self.assertRaises(AssertionError):
       # This command should fail the assertion because reading from
       # standard error is not turned on and as a result the error message
-      # printed on stderr will not be contained in the ChildProcessError
+      # printed on stderr will not be contained in the ProcessError
       # error message.
-      with self.assertRaisesRegex(ChildProcessError, regex):
+      with self.assertRaisesRegex(ProcessError, regex):
         execute(_CAT, path)
 
     # When reading from stderr is turned on the exception must contain
     # the above phrase.
-    with self.assertRaisesRegex(ChildProcessError, regex):
+    with self.assertRaisesRegex(ProcessError, regex):
       execute(_CAT, path, stderr=b"")
 
 
@@ -222,7 +246,7 @@ class TestExecute(TestCase):
         [cmd],
       ]
 
-      with self.assertRaisesRegex(ChildProcessError, regex):
+      with self.assertRaisesRegex(ProcessError, regex):
         pipeline(commands, stderr=b"")
 
 
@@ -367,7 +391,7 @@ class TestExecute(TestCase):
     # Run twice, once with failing command at the end and once somewhere
     # in the middle.
     for _ in range(2):
-      with self.assertRaises(ChildProcessError):
+      with self.assertRaises(ProcessError):
         pipeline(commands)
 
       commands += [identity]
@@ -431,7 +455,7 @@ class TestExecute(TestCase):
         cmd2,
       ]
 
-      with self.assertRaisesRegex(ChildProcessError, regex):
+      with self.assertRaisesRegex(ProcessError, regex):
         spring(commands, stderr=b"")
 
 
