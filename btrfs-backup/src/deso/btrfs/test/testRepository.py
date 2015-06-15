@@ -38,6 +38,8 @@ from deso.btrfs.repository import (
   FileRepository,
   Repository,
   restore,
+  _decodePath,
+  _encodePath,
   _findCommonSnapshots,
   _findRoot,
   _relativize,
@@ -111,6 +113,26 @@ class TestRepositoryBase(BtrfsTestCase):
     self.assertEqual(_relativize("test/"), "./test/")
     self.assertEqual(_relativize("../test/"), "../test/")
     self.assertEqual(_relativize("~/test"), "~/test")
+
+
+  def testPathEncodeDecode(self):
+    """Verify that paths can be encoded and decoded properly."""
+    def doTest(path, expected):
+      """Check correctness of encoding and decoding functionality."""
+      encoded = _encodePath(path)
+      self.assertEqual(encoded, expected)
+      decoded = _decodePath(encoded)
+      self.assertEqual(decoded, _trail(path))
+
+    doTest("/", "@")
+    doTest("/home/user", "@home@user@")
+    doTest("/home/user/", "@home@user@")
+    doTest("/ho@me/user/", "@ho@@me@user@")
+    doTest("/ho@@me/user", "@ho@@@@me@user@")
+    doTest("/ho@@@me/user", "@ho@@@@@@me@user@")
+    doTest("/ho@@@@me/user", "@ho@@@@@@@@me@user@")
+    doTest("/ho@@@@@me/user", "@ho@@@@@@@@@@me@user@")
+    doTest("/this@is@a@long@path@", "@this@@is@@a@@long@@path@@@")
 
 
   def testFindRootCorrectDirectory(self):

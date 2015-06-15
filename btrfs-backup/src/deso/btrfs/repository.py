@@ -59,6 +59,7 @@ from os import (
   uname,
 )
 from os.path import (
+  abspath,
   dirname,
   expanduser,
   isabs,
@@ -102,6 +103,39 @@ _SHOW_IS_ROOT = "is btrfs root"
 # The marker ending the file list reported by the diff() function. If
 # this marker is the only thing reported then no files have changed.
 _DIFF_END_MARKER = "transid marker"
+# The separator of path elements in encoded form.
+_PATH_ELEMENT_SEPARATOR = "@"
+
+
+def _encodePath(path):
+  """Given a path, retrieve an encoded version of it with replaced element separators.
+
+    This function replaces all element separators with custom ones (see
+    _PATH_ELEMENT_SEPARATOR) to make file names less confusing than with
+    native separators.
+  """
+  path = _trail(path)
+  # We allow only for absolute paths to be passed in (abspath always
+  # returns an untrailed path).
+  assert _untrail(path) == abspath(path), path
+  path = path.replace(_PATH_ELEMENT_SEPARATOR, _PATH_ELEMENT_SEPARATOR * 2)
+  path = path.replace(sep, _PATH_ELEMENT_SEPARATOR)
+  return path
+
+
+def _decodePath(string):
+  """Given an encoded path, retrieve the normal form of it.
+
+    Note that regardless of whether the encoded path contained a tailing
+    separator or not the result of this function will always contain
+    one.
+  """
+  # Careful not to replace escaped versions of the separator string.
+  string = string.replace(_PATH_ELEMENT_SEPARATOR * 2, "{d}")
+  string = string.replace(_PATH_ELEMENT_SEPARATOR, "{s}")
+  string = string.format(d=_PATH_ELEMENT_SEPARATOR, s=sep)
+  assert _untrail(string) == abspath(string), string
+  return string
 
 
 def _parseListLine(line):
