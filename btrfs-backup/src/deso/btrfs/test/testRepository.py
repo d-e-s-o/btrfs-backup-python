@@ -604,6 +604,37 @@ class TestBtrfsSync(BtrfsTestCase):
             self.assertTrue(isfile(dst.path(root["path"], ".ssh", "key.pub")))
 
 
+  def testRepositorySubsumingSubvolumesAreTreatedProperly(self):
+    """Verify that subvolumes with names subsuming that of another one are backed up correctly."""
+    with alias(self._mount) as m:
+      snaps = make(m, "snapshots")
+      backup = make(m, "backup")
+
+      src = Repository(snaps)
+      dst = Repository(backup)
+
+      make(m, "root", subvol=True)
+      make(m, "root", "file", data=b"a")
+
+      subvols = [m.path("root")]
+      for i in range(2):
+        # Create subvolumes with names that are a prefix of the
+        # previously created one.
+        make(m, "root%d" % i, subvol=True)
+        make(m, "root%d" % i, "file", data=bytes("%d" % i, "utf-8"))
+
+        subvols += [m.path("root%d" % i)]
+
+      # Create backups of all the subvolumes. After this operation we
+      # also have snapshots if them.
+      syncRepos(subvols, src, dst)
+
+      src_snaps = src.snapshots()
+      dst_snaps = dst.snapshots()
+      parents = dst.parents(None, m.path("root"), src_snaps, dst_snaps)
+      self.assertEqual(len(parents), 1)
+
+
   def testRepositoryUniqueSnapshotName(self):
     """Verify that subvolume paths are correctly canonicalized for snapshot names."""
     with alias(self._mount) as m:

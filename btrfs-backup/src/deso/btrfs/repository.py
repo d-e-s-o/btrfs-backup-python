@@ -182,7 +182,7 @@ def _snapshotFiles(directory, extension, repository):
   # Mind the asterisk between the time and the extension. It is required
   # because we can have snapshots with equal time stamps which are then
   # numbered in an increasing fashion.
-  expression = regex(r"^%s-.*-%s.*%s$" % (base, time, extension))
+  expression = regex(r"^%s.*-%s.*%s$" % (base, time, extension))
 
   # We have to rely on the '-v' parameter here to get a properly sorted
   # list and '-1' to display one file per line. We should not have to
@@ -292,9 +292,9 @@ def _snapshotBaseName(subvolume):
     # the ones in the middle with underscores to make names look less
     # confusing.
     path = subvolume.strip(sep).replace(sep, "_")
-    return "%s-%s" % (name, path)
+    return "%s-%s-" % (name, path)
   else:
-    return name
+    return "%s-" % name
 
 
 def _ensureUniqueName(snapshot, snapshots):
@@ -334,7 +334,7 @@ def _snapshotName(subvolume, snapshots):
   """Retrieve a fully qualified, unique snapshot name."""
   name = _snapshotBaseName(subvolume)
   time = datetime.strftime(datetime.now(), _TIME_FORMAT)
-  snapshot = "%s-%s" % (name, time)
+  snapshot = "%s%s" % (name, time)
 
   return _ensureUniqueName(snapshot, snapshots)
 
