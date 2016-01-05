@@ -46,10 +46,10 @@ from datetime import (
 )
 from argparse import (
   Action,
+  ArgumentError,
   ArgumentParser,
   ArgumentTypeError,
   HelpFormatter,
-  Namespace,
 )
 
 
@@ -119,33 +119,11 @@ def duration(string):
   raise ArgumentTypeError("Invalid duration string: \"%s\"." % string)
 
 
-def checkSnapshotExtension(string, namespace, backup=True):
+def checkSnapshotExtension(string):
   """Validate the given snapshot extension parameter."""
   if string.startswith(extsep):
     error = "Extension must not start with \"%s\"." % extsep
     raise ArgumentTypeError(error)
-
-  # We require that the namespace is already fully set up with the
-  # appropriate filter argument. This constraint is enforced by
-  # reordering the arguments before parsing them such that the snapshot
-  # extension argument appears (and is evaluated) last.
-  if backup:
-    if not namespace.recv_filters:
-      error = "This option must be used in conjunction with --recv-filter."
-      raise ArgumentTypeError(error)
-  else:
-    if not namespace.send_filters:
-      error = "This option must be used in conjunction with --send-filter."
-      raise ArgumentTypeError(error)
-
-  if backup:
-    if not checkFileString(namespace.recv_filters[-1]):
-      error = "The last receive filter must contain the \"{file}\" string."
-      raise ArgumentTypeError(error)
-  else:
-    if not checkFileString(namespace.send_filters[0]):
-      error = "The first send filter must contain the \"{file}\" string."
-      raise ArgumentTypeError(error)
 
   # The extension we store always includes the separator.
   return "%s%s" % (extsep, string)
@@ -170,6 +148,50 @@ class ReverseAction(Action):
       ns.send_filters, ns.recv_filters = ns.recv_filters, ns.send_filters
 
 
+class CheckSnapshotExtensionAction(Action):
+  """Action to check correct usage of the --snapshot-ext parameter."""
+  def __init__(self, option_strings, dest, nargs=None, const=None,
+               default=None, type=None, choices=None, required=False,
+               help=None, metavar=None, backup=None):
+    """Create a new CheckSnapshotExtensionAction object."""
+    super().__init__(option_strings=option_strings, dest=dest, nargs=nargs,
+                     const=const, default=default, type=type,
+                     choices=choices, required=required, help=help,
+                     metavar=metavar)
+
+    assert backup is not None
+    self._backup = backup
+
+
+  def __call__(self, parser, namespace, values, option_string=None):
+    """Helper function to check constraints of arguments during parsing."""
+    # We require that the namespace is already fully set up with the
+    # appropriate filter argument. This constraint is enforced by
+    # reordering the arguments before parsing them such that the snapshot
+    # extension argument appears (and is evaluated) last.
+    if self._backup:
+      if not namespace.recv_filters:
+        error = "This option must be used in conjunction with --recv-filter."
+        raise ArgumentError(self, error)
+    else:
+      if not namespace.send_filters:
+        error = "This option must be used in conjunction with --send-filter."
+        raise ArgumentError(self, error)
+
+    if self._backup:
+      if not checkFileString(namespace.recv_filters[-1]):
+        error = "The last receive filter must contain the \"{file}\" string."
+        raise ArgumentError(self, error)
+    else:
+      if not checkFileString(namespace.send_filters[0]):
+        error = "The first send filter must contain the \"{file}\" string."
+        raise ArgumentError(self, error)
+
+    # We are essentially a sophisticated "store" action. So set the
+    # attribute here.
+    setattr(namespace, self.dest, values)
+
+
 def addStandardArgs(parser):
   """Add the standard arguments --version and --help to an argument parser."""
   parser.add_argument(
@@ -182,7 +204,7 @@ def addStandardArgs(parser):
   )
 
 
-def addOptionalArgs(parser, namespace, backup):
+def addOptionalArgs(parser, backup):
   """Add the optional arguments to a parser."""
   parser.add_argument(
     # In order to implement the --join option we use a trick: We append
@@ -258,18 +280,22 @@ def addOptionalArgs(parser, namespace, backup):
            "must ensure to output the (potentially processed) data to "\
            "stdout."
 
-  # Unfortunately, the only acceptable way to allow for proper checking
-  # of all constraints which the filters have to satisfy in case
-  # --snapshot-ext is provided, is to work on the ArgumentParser's
-  # namespace object here. Since the ArgumentParser parses arguments in
-  # the order they are supplied on the command line (as opposed to the
-  # order they were added in), we rely on the fact that the
-  # --snapshot-ext option is at the end of the argument vector here. The
-  # reorderArg invocation used earlier enforces this property.
+  def createCheckAction(*args, **kwargs):
+    """Create a CheckSnapshotExtensionAction object."""
+    return CheckSnapshotExtensionAction(*args, backup=backup, **kwargs)
+
+  # We use a custom action here to check all the constraints which the
+  # filters have to satisfy in case --snapshot-ext is provided. The
+  # action has access to the internally used namespace. This namespace
+  # needs to contain all required attributes, which means all relevant
+  # arguments need to have been parsed. Since the ArgumentParser parses
+  # arguments in the order they are supplied on the command line (as
+  # opposed to the order they were added in), we rely on the fact that
+  # the --snapshot-ext option is at the end of the argument vector here.
+  # The reorderArg invocation used earlier enforces this property.
   parser.add_argument(
-    "--snapshot-ext", action="store", dest="extension", metavar="extension",
-    type=lambda x: checkSnapshotExtension(x, namespace, backup),
-    help=text,
+    "--snapshot-ext", action=createCheckAction, dest="extension",
+    metavar="extension", type=checkSnapshotExtension, help=text,
   )
   parser.add_argument(
     "--debug", action="store_true", dest="debug", default=False,
@@ -296,7 +322,7 @@ def addRequiredArgs(parser):
   )
 
 
-def addBackupParser(parser, namespace):
+def addBackupParser(parser):
   """Add a parser for the backup command to another parser."""
   backup = parser.add_parser(
     "backup", add_help=False, formatter_class=SubLevelHelpFormatter,
@@ -317,11 +343,11 @@ def addBackupParser(parser, namespace):
          "suffixes are: S (seconds), M (minutes), H (hours), d (days), "
          "w (weeks), m (months), and y (years).",
   )
-  addOptionalArgs(optional, namespace, backup=True)
+  addOptionalArgs(optional, backup=True)
   addStandardArgs(optional)
 
 
-def addRestoreParser(parser, namespace):
+def addRestoreParser(parser):
   """Add a parser for the restore command to another parser."""
   restore = parser.add_parser(
     "restore", add_help=False, formatter_class=SubLevelHelpFormatter,
@@ -337,7 +363,7 @@ def addRestoreParser(parser, namespace):
     default=False,
     help="Restore only snapshots, not the entire source subvolume."
   )
-  addOptionalArgs(optional, namespace, backup=False)
+  addOptionalArgs(optional, backup=False)
   addStandardArgs(optional)
 
 
@@ -429,8 +455,6 @@ def prepareNamespace(ns):
 
 def main(argv):
   """The main function parses the program arguments and reacts on them."""
-  # We need access to the namespace object that parse_args() works on.
-  namespace = Namespace()
   parser = ArgumentParser(prog=name(), add_help=False,
                           description="%s -- %s" % (name(), description()),
                           formatter_class=TopLevelHelpFormatter)
@@ -442,8 +466,8 @@ def main(argv):
   optional = parser.add_argument_group("Optional arguments")
   addStandardArgs(optional)
 
-  addBackupParser(subparsers, namespace)
-  addRestoreParser(subparsers, namespace)
+  addBackupParser(subparsers)
+  addRestoreParser(subparsers)
 
   # Note that argv contains the path to the program as the first element
   # which we kindly ignore. Furthermore, we do some trickery to have
@@ -464,7 +488,7 @@ def main(argv):
   args = argv[1:].copy()
   args = reorderArg(args, "--reverse")
   args = reorderArg(args, "--snapshot-ext")
-  parser.parse_args(args, namespace)
+  namespace = parser.parse_args(args)
 
   with alias(namespace) as ns:
     command, subvolumes, src_repo, dst_repo = prepareNamespace(ns)
