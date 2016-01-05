@@ -1,7 +1,7 @@
 # main.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015 Daniel Mueller (deso@posteo.net)                   *
+# *   Copyright (C) 2015-2016 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -23,7 +23,6 @@ from deso.btrfs.alias import (
   alias,
 )
 from deso.btrfs.argv import (
-  insert as insertArg,
   reorder as reorderArg,
 )
 from deso.btrfs.commands import (
@@ -46,11 +45,11 @@ from datetime import (
   timedelta,
 )
 from argparse import (
+  Action,
   ArgumentParser,
   ArgumentTypeError,
   HelpFormatter,
   Namespace,
-  SUPPRESS,
 )
 
 
@@ -152,16 +151,23 @@ def checkSnapshotExtension(string, namespace, backup=True):
   return "%s%s" % (extsep, string)
 
 
-def reverse(_, namespace):
-  """Helper function to reverse arguments during parsing."""
-  # In case the reverse option was given we swap the repositories and
-  # the filters.
-  with alias(namespace) as ns:
-    if ns.reverse:
+class ReverseAction(Action):
+  """Action to reverse some source/destination arguments."""
+  def __init__(self, option_strings, dest, const=None, default=None,
+               required=False, help=None, metavar=None):
+    """Create a new ReverseAction object."""
+    super().__init__(option_strings=option_strings, dest=dest, nargs=0,
+                     const=const, default=default, required=required,
+                     help=help)
+
+
+  def __call__(self, parser, namespace, values, option_string=None):
+    """Helper function to reverse arguments during parsing."""
+    # In case the reverse option was given we swap the repositories and
+    # the filters.
+    with alias(namespace) as ns:
       ns.src, ns.dst = ns.dst, ns.src
       ns.send_filters, ns.recv_filters = ns.recv_filters, ns.send_filters
-
-  return None
 
 
 def addStandardArgs(parser):
@@ -179,11 +185,9 @@ def addStandardArgs(parser):
 def addOptionalArgs(parser, namespace, backup):
   """Add the optional arguments to a parser."""
   parser.add_argument(
-    # In order to implement the --join option we use a trick: Since we
-    # cannot use a type field that performs an action for us as we do
-    # for the reverse-hidden-helper option (because this option does not
-    # accept an argument), we append the value 'None' to the
-    # 'send_filters' array that stores all send filters.
+    # In order to implement the --join option we use a trick: We append
+    # the value 'None' to the 'send_filters' array that stores all send
+    # filters.
     # TODO: Right now this option can be specified multiple times. That
     #       is wrong and should not be allowed. However, it is tricky to
     #       enforce that. Find a way.
@@ -216,16 +220,9 @@ def addOptionalArgs(parser, namespace, backup):
          "\"/usr/bin/ssh server\".",
   )
   parser.add_argument(
-    "--reverse", action="store_true", dest="reverse", default=False,
+    "--reverse", action=ReverseAction, dest="reverse",
     help="Reverse (i.e., swap) the source and destination repositories "
          "as well as the send and receive filters.",
-  )
-  # A helper option that is used to perform the argument reordering
-  # during parsing.
-  parser.add_argument(
-    "--reverse-hidden-helper", action="store", default=None,
-    dest="reverse_hidden_helper", help=SUPPRESS,
-    type=lambda x: reverse(x, namespace),
   )
   parser.add_argument(
     "--send-filter", action="append", default=None, dest="send_filters",
@@ -426,7 +423,6 @@ def prepareNamespace(ns):
   del ns.dst
   del ns.command
   del ns.reverse
-  del ns.reverse_hidden_helper
 
   return command, subvolumes, src_repo, dst_repo
 
@@ -456,20 +452,17 @@ def main(argv):
   # work the option has to be evaluated after all filter options. To
   # that end, we move it to the end of the options because the
   # ArgumentParser evaluates arguments in the order in which they are
-  # provided in the argument vector. In order to have less branching in
-  # various cases, we want to evaluate the --reverse option on the fly.
-  # The problem there is that it does not accept an argument. So we
-  # insert an artificial, undocumented option that performs the checking
-  # (--reverse-hidden-helper). Because --snapshot-ext already requires
-  # properly ordered arguments, the hidden reverse helper option has to
-  # be evaluated before the former (it also has to be evaluated after
-  # the actual --reverse option, but that is guaranteed since we insert
-  # it at the end).
+  # provided in the argument vector.
+  # In order to have less branching in various cases, we want to
+  # evaluate the --reverse option on the fly. This option has a special
+  # action that reverses the source and destination repositories as well
+  # as the send and receive filters. However, in order for it to work
+  # correctly, it needs to be evaluated just before the --snapshot-ext
+  # option (because the latter requires the reordered arguments) but
+  # after all other options. Hence, we move it to the end right before
+  # we do the same with the --snapshot-ext option.
   args = argv[1:].copy()
-
-  if "--reverse" in args:
-    args = insertArg(args, ["--reverse-hidden-helper", "42"])
-
+  args = reorderArg(args, "--reverse")
   args = reorderArg(args, "--snapshot-ext")
   parser.parse_args(args, namespace)
 
