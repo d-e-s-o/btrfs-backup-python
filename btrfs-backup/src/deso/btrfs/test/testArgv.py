@@ -43,6 +43,26 @@ class TestArgv(TestCase):
     self.assertEqual(insert(args, [arg]), expected)
 
 
+  def testReorderArg(self):
+    """Verify reordering of an argument without a parameter works as expected."""
+    arg = "--some-option"
+
+    # Case 1) The argument is located at the beginning.
+    args = [arg, "--test-option", "--foobar"]
+    expected = ["--test-option", "--foobar", arg]
+    self.assertEqual(reorder(args, arg, has_arg=False), expected)
+
+    # Case 2) The argument is located somewhere in the middle.
+    args = ["--option1", arg, "--option2"]
+    expected = ["--option1", "--option2", arg]
+    self.assertEqual(reorder(args, arg, has_arg=False), expected)
+
+    # Case 3) The argument is located at the end.
+    args = ["--foo-bar-baz", "--foo-1", arg]
+    expected = ["--foo-bar-baz", "--foo-1", arg]
+    self.assertEqual(reorder(args, arg, has_arg=False), expected)
+
+
   def testReorderArgs(self):
     """Verify reordering of arguments works as expected."""
     arg = "--test-arg"
@@ -50,28 +70,28 @@ class TestArgv(TestCase):
     # Case 1) Only a single argument that is the one to reorder. Nothing
     #         should happen.
     args = ["%s=test" % arg]
-    self.assertEqual(reorder(args, arg), args)
+    self.assertEqual(reorder(args, arg, has_arg=True), args)
 
     # Case 2) Again a single argument but this time not connected by '='
     #         but rather split as done by automated argument splitting.
     args = [arg, "test"]
-    self.assertEqual(reorder(args, arg), args)
+    self.assertEqual(reorder(args, arg, has_arg=True), args)
 
     # Case 3) The argument intermixed with other ones.
     args = ["--test1", "%s=test" % arg, "--test2"]
     expected = ["--test1", "--test2", "%s=test" % arg]
-    self.assertEqual(reorder(args, arg), expected)
+    self.assertEqual(reorder(args, arg, has_arg=True), expected)
 
     # Case 4) The argument intermixed and also split in two again.
     args = ["--test1", arg, "test", "--test2"]
     expected = ["--test1", "--test2", arg, "test"]
-    self.assertEqual(reorder(args, arg), expected)
+    self.assertEqual(reorder(args, arg, has_arg=True), expected)
 
     # Case 5) The argument intermixed with other ones. Also verify that
     #         the passed in argument vector is modified in place.
     args = ["--test1", arg, "test", "--test2", "--", "test3"]
     expected = ["--test1", "--test2", arg, "test", "--", "test3"]
-    reordered = reorder(args, arg)
+    reordered = reorder(args, arg, has_arg=True)
 
     self.assertEqual(args, reordered)
     self.assertEqual(reordered, expected)

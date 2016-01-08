@@ -34,34 +34,46 @@ def insert(args, arg):
   return args
 
 
-def remove(args, option):
-  """Remove an option along with an argument from an argument vector."""
+def remove(args, option, has_arg=False):
+  """Remove an option (optionally with an argument) from an argument vector."""
   i = 0
   while i < len(args):
-    # There are two forms in which an option can appear in conjunction
-    # with an argument after parsing. The first one is as two separate
-    # arguments if both were separated using whitespaces.
-    if args[i] == option:
-      result = [args[i], args[i+1]]
-      del args[i+1]
-      del args[i]
-      return args, result
+    if not has_arg:
+      if args[i] == option:
+        result = [args[i]]
+        del args[i]
+        return args, result
+    else:
+      # There are two forms in which an option can appear in conjunction
+      # with an argument after parsing. The first one is as two separate
+      # arguments if both were separated using whitespaces.
+      if args[i] == option:
+        # We need to make sure that we haven't already reached the end
+        # of the argument vector. If we do, the found option does not
+        # count since it does not have an associated argument.
+        if i + 1 >= len(args):
+          break
 
-    # The second one is as a single argument in which case they must
-    # have been separated by an equality sign ('=').
-    if args[i].startswith(option):
-      assert "=" in args[i]
-      result = [args[i]]
-      del args[i]
-      return args, result
+        result = [args[i], args[i+1]]
+        del args[i+1]
+        del args[i]
+        return args, result
+
+      # The second one is as a single argument in which case they must
+      # have been separated by an equality sign ('=').
+      if args[i].startswith(option):
+        assert "=" in args[i]
+        result = [args[i]]
+        del args[i]
+        return args, result
 
     i += 1
   return args, None
 
 
-def reorder(args, option):
+def reorder(args, option, has_arg=False):
   """Move an option along with its argument to the end of the given argument vector."""
-  args, arg = remove(args, option)
+  args, arg = remove(args, option, has_arg=has_arg)
   if arg:
     insert(args, arg)
   return args

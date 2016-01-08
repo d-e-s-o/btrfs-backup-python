@@ -486,8 +486,8 @@ def main(argv):
   # after all other options. Hence, we move it to the end right before
   # we do the same with the --snapshot-ext option.
   args = argv[1:].copy()
-  args = reorderArg(args, "--reverse")
-  args = reorderArg(args, "--snapshot-ext")
+  args = reorderArg(args, "--reverse", has_arg=False)
+  args = reorderArg(args, "--snapshot-ext", has_arg=True)
   namespace = parser.parse_args(args)
 
   with alias(namespace) as ns:
