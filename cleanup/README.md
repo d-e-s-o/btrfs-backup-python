@@ -12,7 +12,9 @@ with defer() as d:
   obj = Object()
   d.defer(obj.destroy)
   obj.register(client)
-  d.defer(lambda: obj.unregister(client))
+  d.defer(obj.unregister, client)
+  # Alternative syntax:
+  # d.defer(lambda: obj.unregister(client))
   raise Exception()
 ```
 

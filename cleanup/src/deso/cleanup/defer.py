@@ -67,9 +67,9 @@ def defer():
       """The block exit handler destroys the object."""
       self.destroy()
 
-    def defer(self, function):
+    def defer(self, function, *args, **kwargs):
       """Register a deferred function invocation."""
-      result = _Function(function)
+      result = _Function(lambda: function(*args, **kwargs))
       self._functions += [result]
       return result
 

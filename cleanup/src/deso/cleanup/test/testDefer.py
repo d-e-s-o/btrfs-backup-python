@@ -40,6 +40,10 @@ class Counter:
     self._count += 1
 
 
+  def add(self, first, second, third):
+    self._count += first + second + third
+
+
   def set(self, value):
     """Directly set the counter's value."""
     self._count = value
@@ -82,8 +86,8 @@ class TestExecute(TestCase):
   def testDeferHasCorrectOrder(self):
     """Verify that deferred functions are invoked in the right order."""
     with defer() as d:
-      d.defer(lambda: self._counter.set(2))
-      d.defer(lambda: self._counter.set(1))
+      d.defer(self._counter.set, 2)
+      d.defer(self._counter.set, 1)
 
     # Functions should be invoked in reverse order to honor potential
     # dependencies between objects.
@@ -102,7 +106,7 @@ class TestExecute(TestCase):
           # Increment d1 once more but in different block.
           d1.defer(self._counter.increment)
           # And now also let d2 change the value.
-          d2.defer(lambda: self._counter.set(4))
+          d2.defer(self._counter.set, 4)
 
           raise Exception()
 
@@ -142,6 +146,17 @@ class TestExecute(TestCase):
 
     # No function should have been executed.
     self.assertEqual(self._counter.count(), 0)
+
+
+  def testDeferCorrectParameterPassing(self):
+    """Verify that variable and keyword arguments can be passed to a deferred function."""
+    with defer() as d:
+      d.defer(self._counter.add, 1, 2, third=3)
+      # A lambda expression should work as well.
+      d.defer(lambda: self._counter.add(first=4, second=5, third=6))
+
+    # All parameters should have been passed to the add() invocation.
+    self.assertEqual(self._counter.count(), 21)
 
 
 if __name__ == "__main__":

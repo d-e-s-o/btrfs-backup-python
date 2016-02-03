@@ -58,13 +58,20 @@ from os import (
   close as close_,
   devnull,
   dup2,
-  execl,
+  execv,
+  execve,
   fork,
   open as open_,
   pipe2,
   read,
-  waitpid,
+  waitpid as waitpid_,
   write,
+  WIFCONTINUED,
+  WIFEXITED,
+  WIFSIGNALED,
+  WIFSTOPPED,
+  WEXITSTATUS,
+  WTERMSIG,
 )
 from select import (
   PIPE_BUF,
@@ -94,6 +101,13 @@ class ProcessError(ChildProcessError):
   """
   def __init__(self, status, name, stderr=None):
     super().__init__()
+
+    # POSIX let's us have an error range of 8 bits. We do not want to
+    # enforce any policy here, so even allow 0. Although it does not
+    # make much sense to have that in an error class. Note that we allow
+    # negative values equally well, as long as they do not cause an
+    # underflow resulting in an effective return code of 0.
+    assert -256 < status and status < 256, status
 
     self._status = status
     self._name = name
@@ -133,15 +147,54 @@ class ProcessError(ChildProcessError):
     return self._stderr
 
 
-def execute(*args, stdin=None, stdout=None, stderr=b""):
+def _exec(*args, env=None):
+  """Convenience wrapper around the set of exec* functions."""
+  # We do not use the exec*p* set of execution functions here, although
+  # that might be tempting. The reason is that by enforcing users to
+  # specify the full path of an executable we basically force them to
+  # use the findCommand function (or some other means to acquire the
+  # full path) and, hence, make them think about what happens when this
+  # command is not available. This is generally a good thing because
+  # problems are caught earlier.
+  if env is None:
+    execv(args[0], list(args))
+  else:
+    execve(args[0], list(args), env)
+
+
+def _waitpid(pid):
+  """Convenience wrapper around the original waitpid invocation."""
+  # 0 and -1 trigger a different behavior in waitpid. We disallow those
+  # values.
+  assert pid > 0
+
+  while True:
+    pid_, status = waitpid_(pid, 0)
+    assert pid_ == pid
+
+    if WIFEXITED(status):
+      return WEXITSTATUS(status)
+    elif WIFSIGNALED(status):
+      # Signals are usually represented as the negated signal number.
+      return -WTERMSIG(status)
+    elif WIFSTOPPED(status) or WIFCONTINUED(status):
+      # In our current usage scenarios we can simply ignore SIGSTOP and
+      # SIGCONT by restarting the wait.
+      continue
+    else:
+      assert False
+      return 1
+
+
+def execute(*args, env=None, stdin=None, stdout=None, stderr=b""):
   """Execute a program synchronously."""
   # Note that 'args' is a tuple. We do not want that so explicitly
   # convert it into a list. Then create another list out of this one to
   # effectively have a pipeline.
-  return pipeline([list(args)], stdin, stdout, stderr)
+  return pipeline([list(args)], env, stdin, stdout, stderr)
 
 
-def _pipeline(commands, fd_in, fd_out, fd_err):
+def _pipeline(commands, env, fd_in, fd_out, fd_err):
   """Run a series of commands connected by their stdout/stdin."""
   pids = []
   first = True
@@ -178,7 +231,7 @@ def _pipeline(commands, fd_in, fd_out, fd_err):
       # the pipe between the processes in any way.
       dup2(fd_err, stderr_.fileno())
 
-      execl(command[0], *command)
+      _exec(*command, env=env)
       # This statement should never be reached: either exec fails in
       # which case a Python exception should be raised or the program is
       # started in which case this process' image is overwritten anyway.
@@ -252,7 +305,7 @@ def formatCommands(commands):
   return s
 
 
-def _wait(pids, commands, data_err, failed=None):
+def _wait(pids, commands, data_err, status=0, failed=None):
   """Wait for all processes represented by a list of process IDs.
 
     Although it might not seem necessary to wait for any other than the
@@ -282,15 +335,18 @@ def _wait(pids, commands, data_err, failed=None):
   # already execute (and wait for) all but the last of these "internal"
   # commands.
   assert len(pids) <= len(commands)
+  # If an error status is set we also must have received the failed
+  # command.
+  assert status == 0 or len(failed) > 0
 
   for i, pid in enumerate(pids):
-    _, status = waitpid(pid, 0)
-
-    if status != 0 and not failed:
+    this_status = _waitpid(pid)
+    if this_status != 0 and status == 0:
       # Only remember the first failure here, then continue clean up.
       failed = formatCommands([commands[i]])
+      status = this_status
 
-  if failed:
+  if status != 0:
     error = data_err.decode("utf-8") if data_err else None
     raise ProcessError(status, failed, error)
 
@@ -355,15 +411,15 @@ class _PipelineFileDescriptors:
       """Setup a pipe for writing data."""
       data["in"], data["out"] = pipe2(O_CLOEXEC)
       data["data"] = argument
-      data["close"] = later.defer(lambda: close_(data["out"]))
-      here.defer(lambda: close_(data["in"]))
+      data["close"] = later.defer(close_, data["out"])
+      here.defer(close_, data["in"])
 
     def pipeRead(argument, data):
       """Setup a pipe for reading data."""
       data["in"], data["out"] = pipe2(O_CLOEXEC)
       data["data"] = argument
-      data["close"] = later.defer(lambda: close_(data["in"]))
-      here.defer(lambda: close_(data["out"]))
+      data["close"] = later.defer(close_, data["in"])
+      here.defer(close_, data["out"])
 
     # By default we are blockable, i.e., we invoke poll without a
     # timeout. This property has to be an attribute of the object
@@ -385,7 +441,7 @@ class _PipelineFileDescriptors:
     # anyway.
     if stdin is None or stdout is None or stderr is None:
       null = open_(devnull, O_RDWR | O_CLOEXEC)
-      here.defer(lambda: close_(null))
+      here.defer(close_, null)
 
       if stdin is None:
         stdin = null
@@ -439,14 +495,14 @@ class _PipelineFileDescriptors:
       """Conditionally set up polling for write events."""
       if data:
         poll_.register(data["out"], _OUT)
-        data["unreg"] = d.defer(lambda: poll_.unregister(data["out"]))
+        data["unreg"] = d.defer(poll_.unregister, data["out"])
         polls[data["out"]] = data
 
     def pollRead(data):
       """Conditionally set up polling for read events."""
       if data:
         poll_.register(data["in"], _IN)
-        data["unreg"] = d.defer(lambda: poll_.unregister(data["in"]))
+        data["unreg"] = d.defer(poll_.unregister, data["in"])
         polls[data["in"]] = data
 
     # We need a poll object if we want to send any data to stdin or want
@@ -544,7 +600,7 @@ class _PipelineFileDescriptors:
            self._stderr["data"] if self._stderr else b""
 
 
-def pipeline(commands, stdin=None, stdout=None, stderr=b""):
+def pipeline(commands, env=None, stdin=None, stdout=None, stderr=b""):
   """Execute a pipeline, supplying the given data to stdin and reading from stdout & stderr.
 
     This function executes a pipeline of commands and connects their
@@ -564,7 +620,7 @@ def pipeline(commands, stdin=None, stdout=None, stderr=b""):
 
       # Finally execute our pipeline and pass in the prepared file
       # descriptors to use.
-      pids = _pipeline(commands, fds.stdin(), fds.stdout(), fds.stderr())
+      pids = _pipeline(commands, env, fds.stdin(), fds.stdout(), fds.stderr())
 
     for _ in fds.poll():
       pass
@@ -578,7 +634,7 @@ def pipeline(commands, stdin=None, stdout=None, stderr=b""):
   return data_out, data_err
 
 
-def _spring(commands, fds):
+def _spring(commands, env, fds):
   """Execute a series of commands and accumulate their output to a single destination.
 
     Due to the nature of springs control flow here is a bit tricky. We
@@ -608,6 +664,7 @@ def _spring(commands, fds):
 
   pids = []
   first = True
+  status = 0
   failed = None
   poller = None
 
@@ -620,6 +677,7 @@ def _spring(commands, fds):
   # (possibly empty) pipeline that processes the output of the spring.
   spring_cmds = commands[0]
   pipe_cmds = commands[1:]
+  pipe_len = len(pipe_cmds)
 
   # We need a pipe to connect the spring's output with the pipeline's
   # input, if there is a pipeline following the spring.
@@ -644,7 +702,7 @@ def _spring(commands, fds):
         close_(fd_in_new)
         close_(fd_out_new)
 
-      execl(command[0], *command)
+      _exec(*command, env=env)
       _exit(-1)
     else:
       # After we started the first command from the spring we need to
@@ -654,7 +712,7 @@ def _spring(commands, fds):
       # in the form of a pipeline.
       if first:
         if pipe_cmds:
-          pids += _pipeline(pipe_cmds, fd_in_new, fd_out, fd_err)
+          pids += _pipeline(pipe_cmds, env, fd_in_new, fd_out, fd_err)
 
         first = False
 
@@ -667,7 +725,7 @@ def _spring(commands, fds):
         pollData(poller)
 
       if not last:
-        _, status = waitpid(pid, 0)
+        status = _waitpid(pid)
         if status != 0:
           # One command failed. Do not start any more commands and
           # indicate failure to the caller. He may try reading data from
@@ -679,17 +737,21 @@ def _spring(commands, fds):
         # If we reached the last command in the spring we can just have
         # it run in background and wait for it to finish later on -- no
         # more serialization is required at that point.
-        pids += [pid]
+        # We insert the pid just before the pids for the pipeline. The
+        # pipeline is started early but it runs the longest (because it
+        # processes the output of the spring) and we must keep this
+        # order in the pid list.
+        pids[-pipe_len:-pipe_len] = [pid]
 
   if pipe_cmds:
     close_(fd_in_new)
     close_(fd_out_new)
 
   assert poller
-  return pids, poller, failed
+  return pids, poller, status, failed
 
 
-def spring(commands, stdout=None, stderr=b""):
+def spring(commands, env=None, stdout=None, stderr=b""):
   """Execute a series of commands and accumulate their output to a single destination."""
   with defer() as later:
     with defer() as here:
@@ -704,7 +766,7 @@ def spring(commands, stdout=None, stderr=b""):
 
       # Finally execute our spring and pass in the prepared file
       # descriptors to use.
-      pids, poller, failed = _spring(commands, fds)
+      pids, poller, status, failed = _spring(commands, env, fds)
 
     # We started all processes and will wait for them to finish. From
     # now on we can allow any invocation of poll to block.
@@ -716,5 +778,5 @@ def spring(commands, stdout=None, stderr=b""):
 
     data_out, data_err = fds.data()
 
-  _wait(pids, commands, data_err, failed=failed)
+  _wait(pids, commands, data_err, status=status, failed=failed)
   return data_out, data_err
