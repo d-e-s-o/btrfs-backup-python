@@ -1,7 +1,7 @@
 # testMain.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015 Daniel Mueller (deso@posteo.net)                   *
+# *   Copyright (C) 2015-2016 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -438,20 +438,7 @@ class TestMainRunBase(BtrfsTestCase):
       self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
       self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
 
-      # Case 3) Once again delete all snapshots but this time
-      #         restore them in conjunction with the --reverse
-      #         option.
-      self.wipeSubvolumes(self._snapshots)
-
-      # This time we use the '--reverse' option.
-      restore("--reverse", "--snapshots-only", src, dst, reverse=True)
-
-      user, root = glob(m.path("snapshots", "*"))
-
-      self.assertContains(m.path(user, "data", "movie.mp4"), "abcdefgh")
-      self.assertContains(m.path(root, ".ssh", "key.pub"), "1234567890")
-
-      # Case 4) Also delete the original subvolumes we snapshotted
+      # Case 3) Also delete the original subvolumes we snapshotted
       #         and verify that they can be restored as well.
       self.wipeSubvolumes(m.path("home"))
       self.wipeSubvolumes(m.path(), pattern="root")
@@ -514,9 +501,8 @@ class TestLocalMainRun(TestMainRunBase):
       ]
       self.backup(src, dst, *options)
 
-    def restore(src, dst, *options, reverse=False):
+    def restore(src, dst, *options):
       """Invoke the program to restore snapshots/subvolumes from an encrypted source."""
-      filt = "recv" if reverse else "send"
       gpg_options = "--decrypt --no-default-keyring "\
                     "--keyring={pubkey} --secret-keyring={privkey} "\
                     "--trust-model=always --batch {{file}}"
@@ -525,10 +511,10 @@ class TestLocalMainRun(TestMainRunBase):
       options = list(options)
       options += [
         "--snapshot-ext=gpg",
-        "--%s-filter=%s %s" % (filt, GPG, gpg_options),
+        "--send-filter=%s %s" % (GPG, gpg_options),
         "--join",
       ]
-      self.restore(src, dst, *options, reverse=reverse)
+      self.restore(src, dst, *options)
     try:
       GPG = findCommand("gpg")
     except FileNotFoundError:
@@ -591,17 +577,16 @@ class TestRemoteMainRun(TestMainRunBase):
       ]
       self.backup(*options)
 
-    def restore(src, dst, *options, reverse=False):
+    def restore(src, dst, *options):
       """Invoke the program to restore snapshots/subvolumes from a remote host."""
-      filt = "recv" if reverse else "send"
       options = list(options)
       options += [
         "--remote-cmd=/usr/bin/ssh %s" % host,
         "--snapshot-ext=bin",
-        "--%s-filter=/bin/dd if={file}" % filt,
+        "--send-filter=/bin/dd if={file}",
         "--no-read-stderr",
       ]
-      self.restore(src, dst, *options, reverse=reverse)
+      self.restore(src, dst, *options)
 
     try:
       SSH = findCommand("ssh")

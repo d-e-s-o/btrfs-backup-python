@@ -73,18 +73,6 @@ the following command can be used:
 
 ``$ btrfs-backup restore --subvolume=subvolume/ backup/ snapshots/``
 
-Alternatively, you can use the --reverse option to keep the order of the
-source and destination repository that was used during backup (as
-opposed to restoration). This option exists for convenience only, so
-that not the entire command line has to be amended but only one word
-replaced and an option appended to convert a backup operation into a
-restore operation.
-
-```
-$ btrfs-backup restore --reverse
-                       --subvolume=subvolume/ snapshots/ backup/
-```
-
 The above step for restoration assumes that the subvolume you initially
 backed up got deleted. However, under certain circumstances it might be
 the case that you only want to restore the snapshots (the read-only
@@ -171,8 +159,7 @@ stream might not result in much savings of bandwidth since it is
 reasonable to believe that the btrfs program already creates a
 sufficiently compressed stream of data.
 Note furthermore that since filters are sensitive to ordering, they have
-to be reordered for the restore case unless the --reverse option
-(explained above) is used.
+to be reordered for the restore case.
 Lastly, note that filtering can be combined with remote command
 execution as one would naively expect.
 

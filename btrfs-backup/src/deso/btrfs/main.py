@@ -129,25 +129,6 @@ def checkSnapshotExtension(string):
   return "%s%s" % (extsep, string)
 
 
-class ReverseAction(Action):
-  """Action to reverse some source/destination arguments."""
-  def __init__(self, option_strings, dest, const=None, default=None,
-               required=False, help=None, metavar=None):
-    """Create a new ReverseAction object."""
-    super().__init__(option_strings=option_strings, dest=dest, nargs=0,
-                     const=const, default=default, required=required,
-                     help=help)
-
-
-  def __call__(self, parser, namespace, values, option_string=None):
-    """Helper function to reverse arguments during parsing."""
-    # In case the reverse option was given we swap the repositories and
-    # the filters.
-    with alias(namespace) as ns:
-      ns.src, ns.dst = ns.dst, ns.src
-      ns.send_filters, ns.recv_filters = ns.recv_filters, ns.send_filters
-
-
 class CheckSnapshotExtensionAction(Action):
   """Action to check correct usage of the --snapshot-ext parameter."""
   def __init__(self, option_strings, dest, nargs=None, const=None,
@@ -240,11 +221,6 @@ def addOptionalArgs(parser, backup):
     help="The command to use for running btrfs on a remote site. Needs "
          "to include the full path to the binary or script, e.g., "
          "\"/usr/bin/ssh server\".",
-  )
-  parser.add_argument(
-    "--reverse", action=ReverseAction, dest="reverse",
-    help="Reverse (i.e., swap) the source and destination repositories "
-         "as well as the send and receive filters.",
   )
   parser.add_argument(
     "--send-filter", action="append", default=None, dest="send_filters",
@@ -427,14 +403,12 @@ def prepareNamespace(ns):
     #       not be a valid command.
     remote_cmd = remote_cmd.split()
 
-  # Note that intuitively only the send filters can contain a None
-  # element in case the --join option is supplied. However, in case we
-  # have a --reverse option as well the filters could get swapped (which
-  # always happens after the insertion of the empty element).
+  # The send filters might contain a None element in case the --join
+  # option is supplied. Handle this case correctly.
   if send_filters:
     send_filters = prepare(send_filters)
   if recv_filters:
-    recv_filters = prepare(recv_filters)
+    recv_filters = split(recv_filters)
 
   ns.recv_filters = recv_filters
   ns.send_filters = send_filters
@@ -448,7 +422,6 @@ def prepareNamespace(ns):
   del ns.src
   del ns.dst
   del ns.command
-  del ns.reverse
 
   return command, subvolumes, src_repo, dst_repo
 
@@ -477,16 +450,7 @@ def main(argv):
   # that end, we move it to the end of the options because the
   # ArgumentParser evaluates arguments in the order in which they are
   # provided in the argument vector.
-  # In order to have less branching in various cases, we want to
-  # evaluate the --reverse option on the fly. This option has a special
-  # action that reverses the source and destination repositories as well
-  # as the send and receive filters. However, in order for it to work
-  # correctly, it needs to be evaluated just before the --snapshot-ext
-  # option (because the latter requires the reordered arguments) but
-  # after all other options. Hence, we move it to the end right before
-  # we do the same with the --snapshot-ext option.
   args = argv[1:].copy()
-  args = reorderArg(args, "--reverse", has_arg=False)
   args = reorderArg(args, "--snapshot-ext", has_arg=True)
   namespace = parser.parse_args(args)
 
