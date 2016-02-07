@@ -166,6 +166,29 @@ class TestRepositoryBase(BtrfsTestCase):
     self.assertEqual(repo.snapshots(), [])
 
 
+  def testRepositoryListSnapshotInMountedSubvolume(self):
+    """Verify that listing of snapshots in a mounted subvolume works as expected."""
+    with alias(self._mount) as m:
+      # Create a subvolume and some data in it.
+      make(m, "subvol", subvol=True)
+      make(m, "subvol", "file", data=b"test")
+
+      # Next create another subvolume 'backup' and subsequently mount this
+      # subvolume in a directory of a different name.
+      make(m, "subvol-snapshots", subvol=True)
+
+      # Mount the 'subvol-backup' volume somewhere else and create a
+      # repository in this mount point.
+      with Mount(self._device.device(), "subvol=subvol-snapshots") as s:
+        repo = Repository(s.path())
+        self.assertEqual(repo.snapshots(), [])
+
+        # A created snapshot must be recognized properly.
+        execute(*snapshot(m.path("subvol"),
+                          s.path()))
+        self.assertEqual(len(repo.snapshots()), 1)
+
+
   def testFileRepositoryListNoSnapshotPresent(self):
     """Verify that if no snapshot file is present an empty list is returned."""
     repo = FileRepository(self._mount.path(), ".bin")

@@ -1,7 +1,7 @@
 # btrfsTest.py
 
 #/***************************************************************************
-# *   Copyright (C) 2014-2015 Daniel Mueller (deso@posteo.net)              *
+# *   Copyright (C) 2014-2016 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -173,11 +173,12 @@ class BtrfsDevice(LoopBackDevice):
 
 class Mount:
   """A class used for mounting a device."""
-  def __init__(self, dev):
+  def __init__(self, dev, *options):
     """The constructor mounts the device in a temporary location."""
     self._directory = mkdtemp()
     try:
-      execute(_MOUNT, dev, self._directory)
+      args = ["-o", ",".join(options)] if options else []
+      execute(_MOUNT, dev, self._directory, *args)
     except:
       rmdir(self._directory)
       raise
