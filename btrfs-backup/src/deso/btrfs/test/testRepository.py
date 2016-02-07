@@ -1,7 +1,7 @@
 # testRepository.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015 Daniel Mueller (deso@posteo.net)                   *
+# *   Copyright (C) 2015-2016 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -138,7 +138,7 @@ class TestRepositoryBase(BtrfsTestCase):
   def testFindRootCorrectDirectory(self):
     """Verify that in case of an error _findRoot reports the proper directory."""
     directory = self._mount.path("non-existent-directory")
-    regex = r"Root of btrfs.*not found.*: \"%s\"" % directory
+    regex = r"Directory.* \"%s\".*not found.*" % directory
     repo = Repository(self._mount.path())
 
     with patch("deso.btrfs.repository._isRoot") as mock_isroot:

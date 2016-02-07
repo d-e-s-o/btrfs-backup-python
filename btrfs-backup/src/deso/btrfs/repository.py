@@ -1,7 +1,7 @@
 # repository.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015 Daniel Mueller (deso@posteo.net)                   *
+# *   Copyright (C) 2015-2016 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -211,29 +211,24 @@ def _snapshotFiles(directory, extension, repository):
   return files
 
 
+def _isDir(directory, repository):
+  """Check if a directory exists."""
+  try:
+    # Append a trailing separator here to indicate that we are
+    # checking for a directory. This way ls will fail if it is not. If
+    # we left out the trailing separator and the directory actually
+    # points to a file, ls would still succeed.
+    func = lambda: ["/bin/ls", _trail(directory)]
+    cmd = repository.command(func)
+
+    execute(*cmd, stderr=repository.stderr)
+    return True
+  except ProcessError:
+    return False
+
+
 def _isRoot(directory, repository):
   """Check if a given directory represents the root of a btrfs file system."""
-  def isDir(directory):
-    """Check if a directory exists."""
-    try:
-      # Append a trailing separator here to indicate that we are
-      # checking for a directory. This way ls will fail if it is not. If
-      # we left out the trailing separator and the directory actually
-      # points to a file, ls would still succeed.
-      func = lambda: ["/bin/ls", _trail(directory)]
-      cmd = repository.command(func)
-
-      execute(*cmd, stderr=repository.stderr)
-      return True
-    except ProcessError:
-      return False
-
-  # TODO: We might want to move this invocation into _findRoot to avoid
-  #       unnecessary invocations, especially since they might be
-  #       remote.
-  if not isDir(directory):
-    raise FileNotFoundError("Directory \"%s\" not found." % directory)
-
   try:
     cmd = repository.command(show, directory)
     output, _ = execute(*cmd, stdout=b"", stderr=repository.stderr)
@@ -255,6 +250,9 @@ def _isRoot(directory, repository):
 def _findRoot(directory, repository):
   """Find the root of the btrfs file system containing the given directory."""
   assert directory
+
+  if not _isDir(directory, repository):
+    raise FileNotFoundError("Directory \"%s\" not found." % directory)
 
   cur_directory = directory
   # Note that we have no guard here against an empty directory as input
