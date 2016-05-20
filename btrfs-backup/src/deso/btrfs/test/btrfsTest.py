@@ -156,7 +156,7 @@ class LoopBackDevice:
 
 class BtrfsDevice(LoopBackDevice):
   """A class representing a device with a btrfs file system."""
-  def __init__(self, size=16*1024*1024):
+  def __init__(self, size=128*1024*1024):
     """Create a loop back device with btrfs.
 
       Notes:
