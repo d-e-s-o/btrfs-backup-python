@@ -304,6 +304,7 @@ def addBackupParser(parser):
     "backup", add_help=False, formatter_class=SubLevelHelpFormatter,
     help="Backup one or more subvolumes.",
   )
+  backup.set_defaults(method=lambda x: x.backup)
 
   required = backup.add_argument_group("Required arguments")
   addRequiredArgs(required)
@@ -329,6 +330,7 @@ def addRestoreParser(parser):
     "restore", add_help=False, formatter_class=SubLevelHelpFormatter,
     help="Restore subvolumes or snapshots from a repository.",
   )
+  restore.set_defaults(method=lambda x: x.restore)
 
   required = restore.add_argument_group("Required arguments")
   addRequiredArgs(required)
@@ -386,7 +388,7 @@ def prepareNamespace(ns):
     else:
       return split(filters)
 
-  command = ns.command
+  method = ns.method
   src_repo = ns.src
   dst_repo = ns.dst
   remote_cmd = ns.remote_cmd
@@ -422,8 +424,9 @@ def prepareNamespace(ns):
   del ns.src
   del ns.dst
   del ns.command
+  del ns.method
 
-  return command, subvolumes, src_repo, dst_repo
+  return method, subvolumes, src_repo, dst_repo
 
 
 def main(argv):
@@ -455,15 +458,7 @@ def main(argv):
   namespace = parser.parse_args(args)
 
   with alias(namespace) as ns:
-    command, subvolumes, src_repo, dst_repo = prepareNamespace(ns)
-
-    if command == "backup":
-      method = lambda x: x.backup
-    elif command == "restore":
-      method = lambda x: x.restore
-    else:
-      assert False
-
+    method, subvolumes, src_repo, dst_repo = prepareNamespace(ns)
     return run(method, subvolumes, src_repo, dst_repo, **vars(ns))
 
 
