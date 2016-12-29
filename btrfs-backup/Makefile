@@ -1,7 +1,7 @@
 # Makefile
 
 #/***************************************************************************
-# *   Copyright (C) 2014-2015 Daniel Mueller (deso@posteo.net)              *
+# *   Copyright (C) 2014-2016 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -18,13 +18,22 @@
 # ***************************************************************************/
 
 ROOT := $(shell pwd)/..
+PYTHONPATH := "$(ROOT)/cleanup/src:$(ROOT)/execute/src:$(ROOT)/btrfs-backup/src:${PYTHONPATH}"
 
 
 .PHONY: test
 test:
-	@PYTHONPATH="$(ROOT)/cleanup/src:$(ROOT)/execute/src:$(ROOT)/btrfs-backup/src:${PYTHONPATH}"\
+	@PYTHONPATH="$(PYTHONPATH)"\
 	 PYTHONDONTWRITEBYTECODE=1\
 		python -m unittest --verbose --buffer deso.btrfs.test.allTests
+
+
+.PHONY: %
+%:
+	@echo "Running deso.btrfs.test.$@ ..."
+	@PYTHONPATH="$(PYTHONPATH)"\
+	 PYTHONDONTWRITEBYTECODE=1\
+		python -m unittest --verbose --buffer deso.btrfs.test.$@
 
 
 ifneq (,$(filter testSetup testAll,$(MAKECMDGOALS)))
@@ -35,7 +44,7 @@ ifneq (,$(filter testSetup testAll,$(MAKECMDGOALS)))
 testSetup: DIR := $(shell mktemp --directory --quiet)
 testSetup:
 	@git clone --quiet $(ROOT) $(DIR)
-	@(export PYTHONPATH="$(DIR)/cleanup/src:$(DIR)/execute/src/:$(DIR)/btrfs-backup/src:${PYTHONPATH}";\
+	@(export PYTHONPATH="$(PYTHONPATH)";\
 	  cd $(DIR)/btrfs-backup &&\
 	    python setup.py --version > /dev/null &&\
 	    python setup.py --description > /dev/null &&\
