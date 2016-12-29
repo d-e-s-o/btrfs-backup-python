@@ -99,7 +99,7 @@ _LIST_REGEX = regex(_LIST_STRING.format(nums=_NUMS_STRING, path=_PATH_STRING))
 # given directory is a subvolume. However, if it is the root of the
 # btrfs file system then it will end in 'is btrfs root'. We need to
 # detect this case to determine the btrfs root.
-_SHOW_IS_ROOT = "is btrfs root"
+_SHOW_IS_ROOT = "is toplevel subvolume"
 _SHOW_SUBVOL_NAME_REGEX = regex(r"\s*Name:\s*(.*)")
 # The marker ending the file list reported by the diff() function. If
 # this marker is the only thing reported then no files have changed.

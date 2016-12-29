@@ -473,7 +473,7 @@ class TestBtrfsSync(BtrfsTestCase):
       backup = make(m, "backup")
 
       directory = "non-existent-directory"
-      regex = r"error accessing.*%s" % directory
+      regex = r"cannot access subvolume.*%s" % directory
       src = Repository(snaps)
       dst = Repository(backup)
 
