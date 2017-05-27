@@ -1,7 +1,7 @@
 # command.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015 Daniel Mueller (deso@posteo.net)                   *
+# *   Copyright (C) 2015,2017 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -123,3 +123,8 @@ def diff(subvolume, generation):
     previous generation ID, determines the files that have been changed.
   """
   return [_BTRFS, "subvolume", "find-new", subvolume, generation]
+
+
+def showFilesystem(filesystem):
+  """Retrieve the command to show information about a btrfs file system."""
+  return [_BTRFS, "filesystem", "show", filesystem]
