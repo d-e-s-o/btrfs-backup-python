@@ -47,11 +47,6 @@ def delete(subvolume):
   return [_BTRFS, "subvolume", "delete", subvolume]
 
 
-def show(subvolume):
-  """Retrieve the command to show information about a btrfs subvolume."""
-  return [_BTRFS, "subvolume", "show", subvolume]
-
-
 def snapshot(source, destination, writable=False):
   """Retrieve the command to create a snapshot of a subvolume."""
   options = []
@@ -128,3 +123,13 @@ def diff(subvolume, generation):
 def showFilesystem(filesystem):
   """Retrieve the command to show information about a btrfs file system."""
   return [_BTRFS, "filesystem", "show", filesystem]
+
+
+def rootId(path):
+  """Retrieve the command to retrieve the subvolume ID of a given path."""
+  return [_BTRFS, "inspect-internal", "rootid", path]
+
+
+def resolveId(id_, path):
+  """Retrieve the command to resolve the path for a subvolume ID."""
+  return [_BTRFS, "inspect-internal", "subvolid-resolve", str(id_), path]

@@ -1,7 +1,7 @@
 # testRepository.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015-2016 Daniel Mueller (deso@posteo.net)              *
+# *   Copyright (C) 2015-2017 Daniel Mueller (deso@posteo.net)              *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -564,6 +564,19 @@ class TestBtrfsSync(BtrfsTestCase):
     with alias(self._mount) as m:
       src = Repository(make(m, "repo1"))
       dst = Repository(make(m, "repo2"))
+
+      self.repositorySyncSequence(src, dst)
+
+
+  def testRepositorySyncWithSubvolMount(self):
+    """Test that syncs work properly for btrfs volumes mounted with the 'subvol' option."""
+    with alias(self._mount) as m:
+      dst = Repository(make(m, "dest"))
+      make(m, "subvol")
+      make(m, "subvol", "snapshots", subvol=True)
+
+    with Mount(self._device.device(), "subvol=subvol/snapshots") as s:
+      src = Repository(make(s))
 
       self.repositorySyncSequence(src, dst)
 

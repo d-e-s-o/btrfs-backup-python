@@ -38,12 +38,13 @@ from deso.btrfs.command import (
   delete,
   deserialize,
   diff,
-  show,
   showFilesystem,
   serialize,
   snapshot as mkSnapshot,
   snapshots as listSnapshots,
   sync as syncFs,
+  resolveId,
+  rootId,
 )
 from deso.btrfs.commands import (
   replaceFileString,
@@ -95,9 +96,6 @@ _PATH_STRING = r"{any}+".format(any=_ANY_STRING)
 # ID A gen B top level C path PATH
 _LIST_STRING = r"^ID {nums} gen ({nums}) top level {nums} path ({path})$"
 _LIST_REGEX = regex(_LIST_STRING.format(nums=_NUMS_STRING, path=_PATH_STRING))
-_SHOW_SUBVOL_NAME = r"\s*Name:\s*(%s)"
-_SHOW_SUBVOL_NAME_REGEX = regex(_SHOW_SUBVOL_NAME % ".*")
-_SHOW_SUBVOL_ROOT_REGEX = regex(_SHOW_SUBVOL_NAME % "<FS_TREE>")
 # The marker ending the file list reported by the diff() function. If
 # this marker is the only thing reported then no files have changed.
 _DIFF_END_MARKER = "transid marker"
@@ -209,6 +207,21 @@ def _snapshotFiles(directory, extension, repository):
   return files
 
 
+def _findSubvolPath(directory, repository):
+  """Find the path of a subvolume containing the given directory relative to the btrfs root."""
+  try:
+    # We start off by looking up the ID of the subvolume containing the
+    # given directory.
+    output, _ = execute(*rootId(directory), stdout=b"", stderr=repository.stderr)
+    id_ = int(output[:-1])
+    # One we have that ID we can look up the subvolume's path relative
+    # to the btrfs root.
+    output, _ = execute(*resolveId(id_, directory), stdout=b"", stderr=repository.stderr)
+    return output[:-1].decode("utf-8")
+  except ProcessError:
+    return None
+
+
 def _isDir(directory, repository):
   """Check if a directory exists."""
   try:
@@ -225,13 +238,6 @@ def _isDir(directory, repository):
     return False
 
 
-def _doShow(directory, repository):
-  """Invoke a btrfs subvolume show and return the output."""
-  cmd = repository.command(show, directory)
-  output, _ = execute(*cmd, stdout=b"", stderr=repository.stderr)
-  return output.decode("utf-8").splitlines()
-
-
 def _isRoot(directory, repository):
   """Check if a given directory represents the root of a btrfs file system."""
   try:
@@ -242,31 +248,6 @@ def _isRoot(directory, repository):
     return False
 
 
-def _isSubvolume(directory, repository):
-  """Check if a given directory is a btrfs subvolume."""
-  try:
-    output = _doShow(directory, repository)
-
-    # In addition to checking whether we are dealing with a subvolume,
-    # we also want to retrieve its name which is one of the properties
-    # listed in the output.
-    for line in output:
-      # We are looking for a line containing the subvolume's name.
-      m = _SHOW_SUBVOL_NAME_REGEX.match(line)
-      # In case of the root we need special treatment. It must not be
-      # reported as a normal subvolume.
-      if m is not None and not _isRoot(directory, repository):
-        name, = m.groups()
-        return True, name
-
-    # We must be dealing with a btrfs root (or the output format
-    # changed. Sigh.).
-    assert _isRoot(directory, repository)
-    return False, None
-  except ProcessError:
-    return False, None
-
-
 def _findDirectory(directory, repository, check):
   """Find a directory that matches a check."""
   assert directory
@@ -275,18 +256,12 @@ def _findDirectory(directory, repository, check):
     raise FileNotFoundError("Directory \"%s\" not found." % directory)
 
   cur_directory = directory
-  # Note that we have no guard here against an empty directory as input
-  # or later because of a dirname invocation. However, the show command
-  # in _doShow used by the two checker functions currently employed will
-  # fail for an empty directory (a case that will also be hit if this
-  # function is run on a non-btrfs file system).
   while True:
     result, blob = check(cur_directory, repository)
     if result:
       return cur_directory, blob
 
     new_directory = dirname(cur_directory)
-
     # Executing a dirname on the root directory ('/') just returns the
     # root directory. Guard against endless loops.
     if new_directory == cur_directory:
@@ -305,11 +280,6 @@ def _findRoot(directory, repository):
 
   found, _ = _findDirectory(directory, repository, isRoot)
   return found
-
-
-def _findSubvol(directory, repository):
-  """Find the btrfs subvolume containing the given directory."""
-  return _findDirectory(directory, repository, _isSubvolume)
 
 
 def _snapshotBaseName(subvolume):
@@ -790,23 +760,10 @@ class Repository(RepositoryBase):
     # retrieve its name. We then replace the last part of "our"
     # directory with this name and use the result as the "expected"
     # directory in the _makeRelative invocation.
-    # TODO: This approach is still not correct if "this" repository is
-    #       contained in a subvolume that does not reside in a
-    #       directory/other subvolume not located in the btrfs root.
-    #       No correlation is possible when only using the btrfs
-    #       command.
-    path, name = _findSubvol(_untrail(self._directory), self)
-    if path is not None:
-      # Craft the path of the directory we anticipate being used in the
-      # listing.
-      list_directory = _trail(join(dirname(_untrail(self._root)), name))
-    else:
-      # We did not find the containing subvolume. This must mean that we
-      # are not in a separate subvolume so we can just use the supplied
-      # directory directly.
-      list_directory = self._directory
+    subvol_path = _trail(_findSubvolPath(self._root, self))
 
     snapshots = _snapshots(self)
+    snapshots = _makeRelative(snapshots, subvol_path)
     # Make all paths absolute.
     snapshots = list(map(makeAbsolute, snapshots))
     # We need to work around the btrfs problem that not necessarily all
@@ -814,7 +771,7 @@ class Repository(RepositoryBase):
     # is done as one step along with converting the absolute snapshot
     # paths to relative ones where we just sort out everything not below
     # our directory.
-    snapshots = _makeRelative(snapshots, list_directory)
+    snapshots = _makeRelative(snapshots, self._directory)
 
     # TODO: We currently return a list of snapshots in the internally
     #       used format, i.e., dicts that contain a 'path' and a 'gen'
