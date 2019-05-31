@@ -1,7 +1,7 @@
 # repository.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015-2017 Daniel Mueller (deso@posteo.net)              *
+# *   Copyright (C) 2015-2017,2019 Daniel Mueller (deso@posteo.net)         *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -212,11 +212,14 @@ def _findSubvolPath(directory, repository):
   try:
     # We start off by looking up the ID of the subvolume containing the
     # given directory.
-    output, _ = execute(*rootId(directory), stdout=b"", stderr=repository.stderr)
+    cmd = repository.command(rootId, directory)
+    output, _ = execute(*cmd, stdout=b"", stderr=repository.stderr)
     id_ = int(output[:-1])
+
     # One we have that ID we can look up the subvolume's path relative
     # to the btrfs root.
-    output, _ = execute(*resolveId(id_, directory), stdout=b"", stderr=repository.stderr)
+    cmd = repository.command(resolveId, id_, directory)
+    output, _ = execute(*cmd, stdout=b"", stderr=repository.stderr)
     return output[:-1].decode("utf-8")
   except ProcessError:
     return None
