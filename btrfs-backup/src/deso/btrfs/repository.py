@@ -1,7 +1,7 @@
 # repository.py
 
 #/***************************************************************************
-# *   Copyright (C) 2015-2017,2019 Daniel Mueller (deso@posteo.net)         *
+# *   Copyright (C) 2015-2017,2019,2021 Daniel Mueller (deso@posteo.net)    *
 # *                                                                         *
 # *   This program is free software: you can redistribute it and/or modify  *
 # *   it under the terms of the GNU General Public License as published by  *
@@ -485,7 +485,7 @@ def _deploy(snapshot, parent, src, dst, src_snaps, subvolume):
 
   # Only if both repositories agree that we should read data from
   # stderr we will do so.
-  stderr = b"" if src.stderr is b"" and dst.stderr is b"" else None
+  stderr = b"" if src.stderr == b"" and dst.stderr == b"" else None
   # Finally transfer the snapshot from the source repository to the
   # destination.
   src_cmds = src.sendPipeline(snapshot, parents)
